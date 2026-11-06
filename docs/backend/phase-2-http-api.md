@@ -72,9 +72,10 @@ responses, and a deterministic mapping from domain errors to HTTP status + error
 - 400 `missing_operand`: no `a`; binary op without `b`.
 - 400 `unexpected_operand`: sqrt with `b`.
 - 422: divide by zero, sqrt(-1), overflow.
-- 405 for `GET /api/v1/calculate`; 404 for unknown path.
+- 405 for `GET /api/v1/calculate`; 404 for unknown path. *(Outcome: both now return the JSON error shape —
+  `method_not_allowed` with an `Allow` header, and `not_found` — and a non-JSON `Content-Type` returns 415.)*
 - `GET /healthz` → 200 `{"status":"ok"}`.
-- Every response has `Content-Type: application/json` (except mux-generated 404/405).
+- Every response has `Content-Type: application/json`.
 - Logger in tests: `slog.New(slog.NewTextHandler(io.Discard, nil))`.
 
 ## Definition of done

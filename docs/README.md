@@ -3,6 +3,11 @@
 Full-stack calculator: React + TypeScript frontend, Go REST backend.
 Source: the assignment brief. Target effort: **~3 h** (budget 2–4 h).
 
+> **Status: implemented.** These documents are the plan the work followed, kept as written so the process is
+> visible. Where the build departed from the plan, the phase document says so in an **Outcome** note, and
+> [Plan vs. outcome](#plan-vs-outcome) below lists every deviation. The root [README](../README.md) describes
+> the finished project.
+
 Guiding principles: correctness, simplicity, maintainability. No databases, auth, queues, frameworks or
 abstractions the problem doesn't need. Each phase is independently reviewable and ends with a commit.
 
@@ -88,10 +93,12 @@ Error body — always the same shape:
 | Unknown operation | 400 | `unknown_operation` |
 | Missing `a`, or missing `b` for a binary op | 400 | `missing_operand` |
 | `b` supplied for `sqrt` | 400 | `unexpected_operand` |
-| Division by zero | 422 | `division_by_zero` |
 | Square root of a negative number | 422 | `invalid_domain` |
+| Division by zero, including 0 raised to a negative power | 422 | `division_by_zero` |
 | Result is ±Inf or NaN (overflow, e.g. `1e308 * 10`; `(-8) ^ 0.5`) | 422 | `result_out_of_range` |
-| Wrong HTTP method | 405 | ServeMux default (+ `Allow` header) |
+| Unknown path | 404 | `not_found` |
+| Wrong HTTP method | 405 | `method_not_allowed` (+ `Allow` header) |
+| `Content-Type` is not `application/json` | 415 | `unsupported_media_type` |
 
 Rationale: 400 = the request itself is malformed; 422 = well-formed request whose math is undefined.
 
@@ -117,5 +124,20 @@ Rationale: 400 = the request itself is malformed; 422 = well-formed request whos
 - **Validation split.** Frontend checks input *shape* for fast feedback; the backend is authoritative for
   all rules (it must be — any client can call it).
 - **Dependencies.** Go: stdlib only. Frontend runtime: `react`, `react-dom`. Frontend dev: Vite,
-  TypeScript, Vitest + coverage-v8, jsdom, Testing Library (react, user-event, jest-dom), template ESLint.
-- **Out of scope:** persistence, auth, history, E2E browser tests, expression parsing / keypad UI.
+  TypeScript, Vitest + coverage-v8, jsdom, Testing Library (react, user-event, jest-dom), and the template's
+  linter (oxlint in the current Vite template, not ESLint).
+- **Out of scope:** persistence, auth, history, E2E browser tests, expression parsing with precedence.
+
+## Plan vs. outcome
+
+| Area | Plan | What was built, and why |
+|---|---|---|
+| UI | Form: input A, operation, input B, Calculate | A pocket-calculator keypad. The form worked but did not look or feel like a calculator. The keypad state lives in a pure reducer (`calculatorState.ts`) with its own tests, and the backend still does every calculation. |
+| Validation | `parseOperand` + `validateInputs` | Only `parseOperand`; with a keypad there are no free-text fields to validate. |
+| Linter | Template ESLint | oxlint, which the current Vite template ships. |
+| 404 / 405 | ServeMux plain-text defaults | JSON bodies, so every response follows the error contract. |
+| Content-Type | Not checked | 415 for non-JSON bodies. |
+| `0 ^ -1` | `result_out_of_range` | `division_by_zero`, which is what it is. |
+| Server tests | None (`main.go` was thin) | `run()` is tested: API, static files, graceful shutdown, busy port. |
+| Static files | `http.FileServer` | Same, without directory listings. |
+| Layout | One breakpoint, centred card | Scales continuously with the window; full screen on phones and tablets. |

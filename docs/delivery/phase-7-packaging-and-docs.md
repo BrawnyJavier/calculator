@@ -50,7 +50,7 @@ single-container deployment, CI, and a README that covers every item the assignm
    sqrt) with real output captured from the running server.
 5. Testing & coverage — commands + coverage summary table (backend per package, frontend overall).
 6. Design decisions & assumptions — single endpoint; 400 vs 422; `percent` = a % of b; float64 trade-off;
-   stdlib-only Go; form UI vs keypad; validation split; no CORS via proxy/same origin; what was
+   stdlib-only Go; keypad UI with a pure reducer; validation split; no CORS via proxy/same origin; what was
    deliberately left out and what I'd add next (rate limiting, OpenAPI spec, E2E tests, history).
 7. Project structure.
 8. AI usage — pointer to `PROMPTS.md`.

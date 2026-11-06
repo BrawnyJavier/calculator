@@ -1,5 +1,11 @@
 # Phase 6 — Frontend: UI
 
+> **Outcome:** built as planned first (commit "frontend: add calculator UI"), then replaced by a keypad
+> calculator after a UI review: the form was correct but did not look or feel like a calculator. The keypad
+> keeps the plan's principle — the backend does every calculation — and moves the input state machine into a
+> pure, unit-tested reducer (`src/calculatorState.ts`). See the root [README](../../README.md#using-the-calculator)
+> and [Plan vs. outcome](../README.md#plan-vs-outcome). The rest of this document is the original plan.
+
 **Budget:** 40 min · **Depends on:** Phase 5 (Phase 3 for manual end-to-end check)
 
 ## Goal

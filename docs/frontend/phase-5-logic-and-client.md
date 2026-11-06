@@ -31,7 +31,8 @@ Single source of truth for UI buttons, accessible labels, and whether operand B 
   - trims; empty → "Enter a number"; `Number(raw)` NaN or non-finite → "Enter a valid number".
   - rejects inputs `Number()` accepts but users wouldn't mean (`"0x10"`, `"1e"`): accept only a plain
     decimal/scientific regex, e.g. `/^[+-]?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?$/i`.
-- `validateInputs(op, rawA, rawB)` → `{ ok: true, request } | { ok: false, errors: { a?, b? } }`,
+- *(Removed with the keypad redesign in Phase 6: there are no free-text fields left to validate.)*
+  `validateInputs(op, rawA, rawB)` → `{ ok: true, request } | { ok: false, errors: { a?, b? } }`,
   ignoring `b` for unary ops.
 - Shape only — no division-by-zero or negative-sqrt checks; the server is authoritative and its
   message is displayed (avoids duplicating rules in two places).
