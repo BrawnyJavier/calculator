@@ -1,36 +1,45 @@
-/* ---------- Tokens ---------- */
+/* ---------- Tokens ----------
+ *
+ * Purple, lavender, mint and deep-purple palette. Every text/background pair
+ * below meets WCAG AA contrast (4.5:1).
+ */
 
 :root {
-  --page: #e9edf5;
-  --blob-1: #a5b4fc;
-  --blob-2: #f0abfc;
-  --blob-3: #93c5fd;
+  --page: #f7f2fd;
+  --blob-1: #c9a7f2;
+  --blob-2: #f2e6ff;
+  --blob-3: #9ff4d9;
 
   --body: rgba(255, 255, 255, 0.72);
   --body-border: rgba(255, 255, 255, 0.9);
-  --body-shadow: 0 30px 60px -20px rgba(30, 41, 89, 0.35), 0 8px 20px -8px rgba(30, 41, 89, 0.2);
+  --body-shadow: 0 30px 60px -20px rgba(56, 39, 87, 0.35), 0 8px 20px -8px rgba(56, 39, 87, 0.2);
 
-  --screen: #f4f6fb;
-  --screen-text: #0f172a;
-  --screen-muted: #64748b;
+  --screen: #faf7ff;
+  --screen-text: #201733;
+  --screen-muted: #6b5b86;
 
   --key-digit: #ffffff;
-  --key-digit-text: #0f172a;
-  --key-function: #e2e8f0;
-  --key-function-text: #334155;
-  --key-shadow: 0 1px 0 rgba(15, 23, 42, 0.06), 0 2px 6px -2px rgba(15, 23, 42, 0.15);
+  --key-digit-text: #201733;
+  --key-function: #f2e6ff;
+  --key-function-text: #382757;
+  --key-shadow: 0 1px 0 rgba(32, 23, 51, 0.06), 0 2px 6px -2px rgba(32, 23, 51, 0.15);
 
-  --accent-from: #6366f1;
-  --accent-to: #8b5cf6;
+  /* Operators: purple. */
+  --accent-from: #8333d4;
+  --accent-to: #6c22bd;
+  --accent-strong: #8333d4; /* pending-operator text and focus rings */
   --accent-text: #ffffff;
-  --accent-glow: rgba(99, 102, 241, 0.45);
-  --equals-from: #f97316;
-  --equals-to: #ec4899;
-  --equals-glow: rgba(236, 72, 153, 0.45);
+  --accent-glow: rgba(131, 51, 212, 0.45);
 
-  --danger: #e11d48;
-  --text: #0f172a;
-  --muted: #64748b;
+  /* Equals: mint with deep-purple text. */
+  --equals-from: #9ff4d9;
+  --equals-to: #6fe6c0;
+  --equals-text: #201733;
+  --equals-glow: rgba(111, 230, 192, 0.6);
+
+  --danger: #c81e4a;
+  --text: #201733;
+  --muted: #6b5b86;
 
   color-scheme: light dark;
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
@@ -41,28 +50,34 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --page: #0b0d14;
-    --blob-1: #4338ca;
-    --blob-2: #86198f;
-    --blob-3: #1d4ed8;
+    --page: #120d1f;
+    --blob-1: #4b1d8f;
+    --blob-2: #382757;
+    --blob-3: #1f6f5a;
 
-    --body: rgba(23, 26, 36, 0.72);
+    --body: rgba(32, 23, 51, 0.72);
     --body-border: rgba(255, 255, 255, 0.08);
     --body-shadow: 0 30px 60px -20px rgba(0, 0, 0, 0.7), 0 8px 20px -8px rgba(0, 0, 0, 0.5);
 
-    --screen: #0f1219;
-    --screen-text: #f8fafc;
-    --screen-muted: #8b95a7;
+    --screen: #170f26;
+    --screen-text: #f5f0ff;
+    --screen-muted: #a99bc4;
 
-    --key-digit: #262a36;
-    --key-digit-text: #f1f5f9;
-    --key-function: #343a49;
-    --key-function-text: #e2e8f0;
+    --key-digit: #2a2040;
+    --key-digit-text: #f5f0ff;
+    --key-function: #382757;
+    --key-function-text: #e9ddff;
     --key-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 2px 6px -2px rgba(0, 0, 0, 0.6);
 
-    --danger: #fb7185;
-    --text: #e2e8f0;
-    --muted: #8b95a7;
+    --accent-from: #9a4fe6;
+    --accent-to: #8333d4;
+    --accent-strong: #b98af0;
+    --accent-glow: rgba(154, 79, 230, 0.45);
+    --equals-glow: rgba(111, 230, 192, 0.35);
+
+    --danger: #ff7a8a;
+    --text: #e9ddff;
+    --muted: #a99bc4;
   }
 }
 
@@ -366,7 +381,7 @@ kbd {
 }
 
 .key:focus-visible {
-  outline: 2px solid var(--accent-from);
+  outline: 2px solid var(--accent-strong);
   outline-offset: 3px;
 }
 
@@ -390,16 +405,16 @@ kbd {
 
 /* The pending operator inverts, so you can see what "=" will do. */
 .key--operator.key--active {
-  color: var(--accent-from);
+  color: var(--accent-strong);
   background: var(--key-digit);
   box-shadow:
-    0 0 0 2px var(--accent-from) inset,
+    0 0 0 2px var(--accent-strong) inset,
     0 8px 20px -6px var(--accent-glow);
 }
 
 .key--equals {
   font-size: max(0.875rem, 9.6cqi);
-  color: var(--accent-text);
+  color: var(--equals-text);
   background: linear-gradient(160deg, var(--equals-from), var(--equals-to));
   box-shadow: 0 10px 24px -8px var(--equals-glow);
 }
