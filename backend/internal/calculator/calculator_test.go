@@ -90,7 +90,8 @@ func TestCalculateErrors(t *testing.T) {
 		{"add overflow", Add, math.MaxFloat64, ptr(math.MaxFloat64), ErrNonFiniteResult},
 		{"power overflow", Power, 10, ptr(400), ErrNonFiniteResult},
 		{"power negative base fractional exponent", Power, -8, ptr(0.5), ErrNonFiniteResult},
-		{"power zero to negative exponent", Power, 0, ptr(-1), ErrNonFiniteResult},
+		{"power zero to negative exponent", Power, 0, ptr(-1), ErrDivisionByZero},
+		{"power zero to negative fractional exponent", Power, 0, ptr(-0.5), ErrDivisionByZero},
 		{"divide overflow", Divide, 1e308, ptr(1e-10), ErrNonFiniteResult},
 	}
 

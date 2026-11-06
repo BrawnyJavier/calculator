@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"mime"
 	"net/http"
 	"reflect"
 	"strings"
@@ -43,6 +44,9 @@ type errorResponse struct {
 // Error codes returned in the "code" field of error responses.
 const (
 	codeInvalidRequest    = "invalid_request"
+	codeUnsupportedMedia  = "unsupported_media_type"
+	codeNotFound          = "not_found"
+	codeMethodNotAllowed  = "method_not_allowed"
 	codeUnknownOperation  = "unknown_operation"
 	codeMissingOperand    = "missing_operand"
 	codeUnexpectedOperand = "unexpected_operand"
@@ -60,12 +64,33 @@ type handler struct {
 //
 //	POST /api/v1/calculate
 //	GET  /healthz
+//
+// Every response, including 404 and 405, has a JSON body.
 func NewHandler(logger *slog.Logger) http.Handler {
 	h := &handler{logger: logger}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/v1/calculate", h.calculate)
 	mux.HandleFunc("GET /healthz", h.health)
+
+	// ServeMux answers unmatched requests in plain text, so register
+	// method-less fallbacks: the method-specific patterns above take
+	// precedence, and these catch everything else.
+	mux.HandleFunc("/api/v1/calculate", h.methodNotAllowed("POST"))
+	mux.HandleFunc("/healthz", h.methodNotAllowed("GET, HEAD"))
+	mux.HandleFunc("/", h.notFound)
 	return mux
+}
+
+func (h *handler) methodNotAllowed(allow string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Allow", allow)
+		h.writeError(w, http.StatusMethodNotAllowed, codeMethodNotAllowed,
+			fmt.Sprintf("method %s is not allowed; use %s", r.Method, allow))
+	}
+}
+
+func (h *handler) notFound(w http.ResponseWriter, r *http.Request) {
+	h.writeError(w, http.StatusNotFound, codeNotFound, fmt.Sprintf("no route for %s", r.URL.Path))
 }
 
 func (h *handler) health(w http.ResponseWriter, _ *http.Request) {
@@ -73,6 +98,11 @@ func (h *handler) health(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (h *handler) calculate(w http.ResponseWriter, r *http.Request) {
+	if !isJSON(r.Header.Get("Content-Type")) {
+		h.writeError(w, http.StatusUnsupportedMediaType, codeUnsupportedMedia, `Content-Type must be "application/json"`)
+		return
+	}
+
 	var req calculateRequest
 	if err := decodeJSON(w, r, &req); err != nil {
 		h.writeError(w, http.StatusBadRequest, codeInvalidRequest, err.Error())
@@ -104,6 +134,13 @@ func (h *handler) calculate(w http.ResponseWriter, r *http.Request) {
 		B:         req.B,
 		Result:    result,
 	})
+}
+
+// isJSON reports whether a Content-Type header value is application/json,
+// with or without parameters such as charset.
+func isJSON(contentType string) bool {
+	mediaType, _, err := mime.ParseMediaType(contentType)
+	return err == nil && mediaType == "application/json"
 }
 
 // decodeJSON strictly decodes a single JSON object from the request body into

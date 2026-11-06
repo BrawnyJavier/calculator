@@ -76,6 +76,11 @@ func Calculate(op Operation, a float64, b *float64) (float64, error) {
 		}
 		result = a / *b
 	case Power:
+		// 0^-n is 1/0^n: report it as the division by zero it is rather
+		// than as the overflow math.Pow's +Inf would suggest.
+		if a == 0 && *b < 0 {
+			return 0, ErrDivisionByZero
+		}
 		result = math.Pow(a, *b)
 	case Percent:
 		result = a * *b / 100

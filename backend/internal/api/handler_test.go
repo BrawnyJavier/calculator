@@ -90,6 +90,7 @@ func TestCalculateErrors(t *testing.T) {
 		{"negative sqrt", `{"operation":"sqrt","a":-1}`, 422, codeInvalidDomain, "negative"},
 		{"overflow", `{"operation":"multiply","a":1e308,"b":10}`, 422, codeResultOutOfRange, "out of range"},
 		{"NaN result", `{"operation":"power","a":-8,"b":0.5}`, 422, codeResultOutOfRange, "out of range"},
+		{"zero to a negative power", `{"operation":"power","a":0,"b":-1}`, 422, codeDivisionByZero, "divide by zero"},
 	}
 
 	for _, tt := range tests {
@@ -127,6 +128,7 @@ func TestRouting(t *testing.T) {
 		{"PUT calculate not allowed", http.MethodPut, "/api/v1/calculate", http.StatusMethodNotAllowed, "POST"},
 		{"POST healthz not allowed", http.MethodPost, "/healthz", http.StatusMethodNotAllowed, "GET, HEAD"},
 		{"unknown path", http.MethodGet, "/api/v1/nope", http.StatusNotFound, ""},
+		{"root", http.MethodGet, "/", http.StatusNotFound, ""},
 	}
 
 	for _, tt := range tests {
@@ -137,6 +139,53 @@ func TestRouting(t *testing.T) {
 			}
 			if got := rec.Header().Get("Allow"); got != tt.wantAllow {
 				t.Errorf("Allow = %q, want %q", got, tt.wantAllow)
+			}
+			assertJSONContentType(t, rec)
+
+			wantCode := codeNotFound
+			if tt.wantStatus == http.StatusMethodNotAllowed {
+				wantCode = codeMethodNotAllowed
+			}
+			var got errorResponse
+			if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+				t.Fatalf("decode error body: %v; body: %s", err, rec.Body)
+			}
+			if got.Error.Code != wantCode {
+				t.Errorf("code = %q, want %q", got.Error.Code, wantCode)
+			}
+		})
+	}
+}
+
+func TestCalculateContentType(t *testing.T) {
+	tests := []struct {
+		name        string
+		contentType string
+		wantStatus  int
+	}{
+		{"json", "application/json", http.StatusOK},
+		{"json with charset", "application/json; charset=utf-8", http.StatusOK},
+		{"missing", "", http.StatusUnsupportedMediaType},
+		{"form", "application/x-www-form-urlencoded", http.StatusUnsupportedMediaType},
+		{"text", "text/plain", http.StatusUnsupportedMediaType},
+		{"malformed", "application/json; =", http.StatusUnsupportedMediaType},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/calculate", strings.NewReader(`{"operation":"add","a":1,"b":2}`))
+			if tt.contentType != "" {
+				req.Header.Set("Content-Type", tt.contentType)
+			}
+			rec := httptest.NewRecorder()
+			newTestServer().ServeHTTP(rec, req)
+
+			if rec.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d; body: %s", rec.Code, tt.wantStatus, rec.Body)
+			}
+			assertJSONContentType(t, rec)
+			if tt.wantStatus == http.StatusUnsupportedMediaType && !strings.Contains(rec.Body.String(), codeUnsupportedMedia) {
+				t.Errorf("body = %s, want code %q", rec.Body, codeUnsupportedMedia)
 			}
 		})
 	}

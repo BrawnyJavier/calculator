@@ -11,11 +11,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"path"
 	"syscall"
 	"time"
 
@@ -49,7 +51,7 @@ func run(ctx context.Context, getenv func(string) string, stdout io.Writer) erro
 		mux := http.NewServeMux()
 		mux.Handle("/api/", handler)
 		mux.Handle("/healthz", handler)
-		mux.Handle("/", http.FileServer(http.Dir(dir)))
+		mux.Handle("/", http.FileServer(noDirListing{http.Dir(dir)}))
 		handler = mux
 		logger.Info("serving static files", "dir", dir)
 	}
@@ -93,4 +95,29 @@ func run(ctx context.Context, getenv func(string) string, stdout io.Writer) erro
 	}
 	logger.Info("server stopped")
 	return nil
+}
+
+// noDirListing wraps a FileSystem so that directories without an index.html
+// are reported as not found instead of being listed by http.FileServer.
+type noDirListing struct{ fs http.FileSystem }
+
+func (n noDirListing) Open(name string) (http.File, error) {
+	f, err := n.fs.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	info, err := f.Stat()
+	if err != nil {
+		f.Close()
+		return nil, err
+	}
+	if info.IsDir() {
+		index, err := n.fs.Open(path.Join(name, "index.html"))
+		if err != nil {
+			f.Close()
+			return nil, fs.ErrNotExist
+		}
+		index.Close()
+	}
+	return f, nil
 }
