@@ -1,0 +1,10 @@
+.git
+.github
+.claude
+docs
+**/node_modules
+**/dist
+**/coverage
+backend/coverage.*
+backend/bin
+**/.DS_Store

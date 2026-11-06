@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache: false # stdlib only: nothing to cache
+      - name: gofmt
+        run: test -z "$(gofmt -l .)" || (gofmt -l .; exit 1)
+      - run: go vet ./...
+      - run: go test -race -coverprofile=coverage.out ./...
+      - run: go tool cover -func=coverage.out
+      - run: go tool cover -html=coverage.out -o coverage.html
+      - uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage
+          path: backend/coverage.html
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run coverage
+      - run: npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frontend-coverage
+          path: frontend/coverage/
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: docker build -t calculator .
+      - name: Smoke test the image
+        run: |
+          docker run -d --name calculator -p 8080:8080 calculator
+          for i in $(seq 1 20); do curl -fsS localhost:8080/healthz && break; sleep 0.5; done
+          curl -fsS localhost:8080/ | grep -q '<div id="root">'
+          curl -fsS localhost:8080/api/v1/calculate -H 'Content-Type: application/json' \
+            -d '{"operation":"divide","a":10,"b":4}' | grep -q '"result":2.5'
+      - if: failure()
+        run: docker logs calculator

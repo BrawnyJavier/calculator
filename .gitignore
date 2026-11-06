@@ -1,9 +1,11 @@
-# OS / editor
+# OS / editor / local tooling
 .DS_Store
 .idea/
 .vscode/
+.claude/
 
 # Go
+backend/bin/
 backend/coverage.out
 backend/coverage.html
 
