@@ -29,6 +29,7 @@ var (
 	ErrUnexpectedOperand = errors.New("unexpected operand")
 	ErrDivisionByZero    = errors.New("cannot divide by zero")
 	ErrNegativeSqrt      = errors.New("cannot take the square root of a negative number")
+	ErrUndefinedResult   = errors.New("result is not a real number")
 	ErrNonFiniteResult   = errors.New("result is out of range")
 )
 
@@ -47,9 +48,10 @@ func Arity(op Operation) (n int, ok bool) {
 // Calculate applies op to a and, for binary operations, b. b must be nil for
 // unary operations and non-nil for binary ones.
 //
-// Percent returns a percent of b (a * b / 100). Results that are not finite
-// (overflow, or NaN such as a negative base with a fractional exponent) are
-// reported as ErrNonFiniteResult.
+// Percent returns a percent of b (a * b / 100). A result that is not a real
+// number (a negative base with a fractional exponent) is reported as
+// ErrUndefinedResult, and one that overflows as ErrNonFiniteResult. A zero
+// result is always +0, never -0.
 func Calculate(op Operation, a float64, b *float64) (float64, error) {
 	arity, ok := Arity(op)
 	if !ok {
@@ -84,6 +86,11 @@ func Calculate(op Operation, a float64, b *float64) (float64, error) {
 		result = math.Pow(a, *b)
 	case Percent:
 		result = a * *b / 100
+		if math.IsInf(result, 0) {
+			// a*b overflowed before the division; scale first instead.
+			// Not the default order, because b/100 is rarely exact.
+			result = a * (*b / 100)
+		}
 	case Sqrt:
 		if a < 0 {
 			return 0, ErrNegativeSqrt
@@ -91,8 +98,13 @@ func Calculate(op Operation, a float64, b *float64) (float64, error) {
 		result = math.Sqrt(a)
 	}
 
-	if math.IsInf(result, 0) || math.IsNaN(result) {
+	switch {
+	case math.IsNaN(result):
+		return 0, ErrUndefinedResult
+	case math.IsInf(result, 0):
 		return 0, ErrNonFiniteResult
+	case result == 0:
+		return 0, nil // normalise -0 (e.g. -1 * 0) to 0
 	}
 	return result, nil
 }

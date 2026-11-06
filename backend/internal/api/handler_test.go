@@ -36,6 +36,7 @@ func TestCalculateSuccess(t *testing.T) {
 		{"divide", `{"operation":"divide","a":10,"b":4}`, `{"operation":"divide","a":10,"b":4,"result":2.5}`},
 		{"power", `{"operation":"power","a":2,"b":10}`, `{"operation":"power","a":2,"b":10,"result":1024}`},
 		{"percent", `{"operation":"percent","a":15,"b":200}`, `{"operation":"percent","a":15,"b":200,"result":30}`},
+		{"never negative zero", `{"operation":"multiply","a":-1,"b":0}`, `{"operation":"multiply","a":-1,"b":0,"result":0}`},
 		{"sqrt omits b", `{"operation":"sqrt","a":16}`, `{"operation":"sqrt","a":16,"result":4}`},
 		{"zero operands", `{"operation":"add","a":0,"b":0}`, `{"operation":"add","a":0,"b":0,"result":0}`},
 		{"scientific notation", `{"operation":"multiply","a":1e3,"b":2}`, `{"operation":"multiply","a":1000,"b":2,"result":2000}`},
@@ -75,10 +76,16 @@ func TestCalculateErrors(t *testing.T) {
 		{"numeric operation", `{"operation":1,"a":1,"b":2}`, 400, codeInvalidRequest, `field "operation" must be a string`},
 		{"trailing data", `{"operation":"add","a":1,"b":2}{}`, 400, codeInvalidRequest, "single JSON object"},
 		{"body too large", `{"operation":"add","a":1,"b":2,"pad":"` + strings.Repeat("x", maxBodyBytes) + `"}`, 400, codeInvalidRequest, "must not exceed"},
-		{"number too large for float64", `{"operation":"add","a":1e400,"b":1}`, 400, codeInvalidRequest, `field "a" must be a number`},
+		{"number too large for float64", `{"operation":"add","a":1e400,"b":1}`, 400, codeInvalidRequest, `field "a" is out of range`},
+		{"negative number too large for float64", `{"operation":"add","a":1,"b":-1e400}`, 400, codeInvalidRequest, `field "b" is out of range`},
+		{"key differs in case", `{"operation":"add","a":1,"b":2,"A":5}`, 400, codeInvalidRequest, `unknown field "A"`},
+		{"duplicate operation", `{"operation":"add","a":1,"b":2,"operation":"divide"}`, 400, codeInvalidRequest, `duplicate field "operation"`},
+		{"duplicate operand", `{"operation":"add","a":1,"a":2,"b":3}`, 400, codeInvalidRequest, `duplicate field "a"`},
+		{"unknown field with nested value", `{"operation":"add","a":1,"b":2,"x":{"y":[1]}}`, 400, codeInvalidRequest, `unknown field "x"`},
 
 		// Invalid operation or operands.
-		{"missing operation", `{"a":1,"b":2}`, 400, codeUnknownOperation, `"operation" is required`},
+		{"missing operation", `{"a":1,"b":2}`, 400, codeInvalidRequest, `"operation" is required`},
+		{"unknown operation without operands", `{"operation":"foo"}`, 400, codeUnknownOperation, `unknown operation "foo"`},
 		{"unknown operation", `{"operation":"modulo","a":1,"b":2}`, 400, codeUnknownOperation, `unknown operation "modulo"`},
 		{"missing a", `{"operation":"add","b":2}`, 400, codeMissingOperand, `"a" is required`},
 		{"null a", `{"operation":"add","a":null,"b":2}`, 400, codeMissingOperand, `"a" is required`},
@@ -89,7 +96,7 @@ func TestCalculateErrors(t *testing.T) {
 		{"division by zero", `{"operation":"divide","a":1,"b":0}`, 422, codeDivisionByZero, "divide by zero"},
 		{"negative sqrt", `{"operation":"sqrt","a":-1}`, 422, codeInvalidDomain, "negative"},
 		{"overflow", `{"operation":"multiply","a":1e308,"b":10}`, 422, codeResultOutOfRange, "out of range"},
-		{"NaN result", `{"operation":"power","a":-8,"b":0.5}`, 422, codeResultOutOfRange, "out of range"},
+		{"NaN result", `{"operation":"power","a":-8,"b":0.5}`, 422, codeInvalidDomain, "not a real number"},
 		{"zero to a negative power", `{"operation":"power","a":0,"b":-1}`, 422, codeDivisionByZero, "divide by zero"},
 	}
 

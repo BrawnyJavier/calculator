@@ -37,6 +37,8 @@ func TestCalculate(t *testing.T) {
 		{"percent", Percent, 15, ptr(200), 30},
 		{"percent over 100", Percent, 150, ptr(40), 60},
 		{"percent negative", Percent, -10, ptr(50), -5},
+		{"percent of a huge number", Percent, 1e308, ptr(50), 5e307},
+		{"percent huge rate", Percent, 50, ptr(1e308), 5e307},
 		{"very small values", Multiply, 1e-200, ptr(1e-100), 1e-300},
 		{"large but finite", Multiply, 1e154, ptr(1e154), 1e308},
 	}
@@ -61,6 +63,36 @@ func TestCalculateFloatingPoint(t *testing.T) {
 	}
 	if !almostEqual(got, 0.3) {
 		t.Errorf("0.1 + 0.2 = %v, want approximately 0.3", got)
+	}
+}
+
+func TestCalculateNeverReturnsNegativeZero(t *testing.T) {
+	negZero := math.Copysign(0, -1)
+	tests := []struct {
+		name string
+		op   Operation
+		a    float64
+		b    *float64
+	}{
+		{"multiply negative by zero", Multiply, -1, ptr(0)},
+		{"divide zero by negative", Divide, 0, ptr(-5)},
+		{"add negative zeros", Add, negZero, ptr(negZero)},
+		{"subtract to negative zero", Subtract, negZero, ptr(0)},
+		{"percent of negative zero", Percent, negZero, ptr(50)},
+		{"sqrt of negative zero", Sqrt, negZero, nil},
+		{"power negative zero", Power, negZero, ptr(3)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := Calculate(tt.op, tt.a, tt.b)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != 0 || math.Signbit(got) {
+				t.Errorf("Calculate(%q, %v, %v) = %v (signbit %v), want +0", tt.op, tt.a, deref(tt.b), got, math.Signbit(got))
+			}
+		})
 	}
 }
 
@@ -89,7 +121,8 @@ func TestCalculateErrors(t *testing.T) {
 		{"multiply overflow", Multiply, 1e308, ptr(10), ErrNonFiniteResult},
 		{"add overflow", Add, math.MaxFloat64, ptr(math.MaxFloat64), ErrNonFiniteResult},
 		{"power overflow", Power, 10, ptr(400), ErrNonFiniteResult},
-		{"power negative base fractional exponent", Power, -8, ptr(0.5), ErrNonFiniteResult},
+		{"power negative base fractional exponent", Power, -8, ptr(0.5), ErrUndefinedResult},
+		{"percent overflow", Percent, 1e308, ptr(1e308), ErrNonFiniteResult},
 		{"power zero to negative exponent", Power, 0, ptr(-1), ErrDivisionByZero},
 		{"power zero to negative fractional exponent", Power, 0, ptr(-0.5), ErrDivisionByZero},
 		{"divide overflow", Divide, 1e308, ptr(1e-10), ErrNonFiniteResult},

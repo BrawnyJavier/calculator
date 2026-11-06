@@ -3,6 +3,7 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -65,7 +66,9 @@ type handler struct {
 //	POST /api/v1/calculate
 //	GET  /healthz
 //
-// Every response, including 404 and 405, has a JSON body.
+// Every response this handler writes, including 404 and 405, has a JSON body.
+// The one exception comes from ServeMux itself: a request for an unclean path
+// (such as "/api/v1//calculate") is redirected to the clean one with a 307.
 func NewHandler(logger *slog.Logger) http.Handler {
 	h := &handler{logger: logger}
 	mux := http.NewServeMux()
@@ -109,7 +112,14 @@ func (h *handler) calculate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Operation == "" {
-		h.writeError(w, http.StatusBadRequest, codeUnknownOperation, `field "operation" is required`)
+		h.writeError(w, http.StatusBadRequest, codeInvalidRequest, `field "operation" is required`)
+		return
+	}
+	// Check the operation before the operands, so that a request with an
+	// unknown operation is told so rather than which operand is missing.
+	op := calculator.Operation(req.Operation)
+	if _, ok := calculator.Arity(op); !ok {
+		h.writeError(w, http.StatusBadRequest, codeUnknownOperation, fmt.Sprintf("unknown operation %q", op))
 		return
 	}
 	if req.A == nil {
@@ -117,7 +127,6 @@ func (h *handler) calculate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	op := calculator.Operation(req.Operation)
 	result, err := calculator.Calculate(op, *req.A, req.B)
 	if err != nil {
 		status, code, msg := mapError(op, err)
@@ -144,34 +153,46 @@ func isJSON(contentType string) bool {
 }
 
 // decodeJSON strictly decodes a single JSON object from the request body into
-// dst. Returned errors have client-safe messages.
+// dst, a pointer to a struct. Returned errors have client-safe messages.
+//
+// Beyond what encoding/json enforces, keys must match a field's JSON name
+// exactly and appear at most once: by default encoding/json matches keys
+// case-insensitively and lets the last duplicate win, so {"a":1,"A":5} would
+// silently set a to 5.
 func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) error {
-	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyBytes))
-	dec.DisallowUnknownFields()
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBodyBytes))
+	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			return fmt.Errorf("request body must not exceed %d bytes", maxBytesErr.Limit)
+		}
+		return errors.New("request body could not be read")
+	}
+	if err := checkKeys(body, jsonFieldNames(dst)); err != nil {
+		return err
+	}
 
+	dec := json.NewDecoder(bytes.NewReader(body))
 	if err := dec.Decode(dst); err != nil {
 		var syntaxErr *json.SyntaxError
 		var typeErr *json.UnmarshalTypeError
-		var maxBytesErr *http.MaxBytesError
 		switch {
 		case errors.Is(err, io.EOF):
 			return errors.New("request body is empty")
-		case errors.As(err, &maxBytesErr):
-			return fmt.Errorf("request body must not exceed %d bytes", maxBytesErr.Limit)
 		case errors.As(err, &syntaxErr), errors.Is(err, io.ErrUnexpectedEOF):
 			return errors.New("request body is not valid JSON")
 		case errors.As(err, &typeErr):
 			if typeErr.Field == "" {
 				return errors.New("request body must be a JSON object")
 			}
-			want := typeErr.Type.String()
 			if typeErr.Type.Kind() == reflect.Float64 {
-				want = "number"
+				if strings.HasPrefix(typeErr.Value, "number") {
+					// A number such as 1e400 that float64 cannot hold.
+					return fmt.Errorf("field %q is out of range", typeErr.Field)
+				}
+				return fmt.Errorf("field %q must be a number", typeErr.Field)
 			}
-			return fmt.Errorf("field %q must be a %s", typeErr.Field, want)
-		case strings.HasPrefix(err.Error(), "json: unknown field "):
-			// encoding/json has no typed error for unknown fields.
-			return fmt.Errorf("unknown field %s", strings.TrimPrefix(err.Error(), "json: unknown field "))
+			return fmt.Errorf("field %q must be a %s", typeErr.Field, typeErr.Type)
 		default:
 			return errors.New("request body is invalid")
 		}
@@ -181,6 +202,53 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) error {
 		return errors.New("request body must contain a single JSON object")
 	}
 	return nil
+}
+
+// checkKeys rejects a top-level JSON object whose keys are not all in fields
+// or that repeats a key. Anything that is not a well-formed object is left for
+// the full decode to report, so its error messages stay in one place.
+func checkKeys(body []byte, fields map[string]bool) error {
+	dec := json.NewDecoder(bytes.NewReader(body))
+	if tok, err := dec.Token(); err != nil || tok != json.Delim('{') {
+		return nil
+	}
+	seen := make(map[string]bool, len(fields))
+	for dec.More() {
+		tok, err := dec.Token()
+		if err != nil {
+			return nil
+		}
+		key, _ := tok.(string)
+		switch {
+		case !fields[key]:
+			return fmt.Errorf("unknown field %q", key)
+		case seen[key]:
+			return fmt.Errorf("duplicate field %q", key)
+		}
+		seen[key] = true
+		var skip json.RawMessage
+		if err := dec.Decode(&skip); err != nil {
+			return nil
+		}
+	}
+	return nil
+}
+
+// jsonFieldNames returns the JSON names of the fields of the struct dst
+// points to.
+func jsonFieldNames(dst any) map[string]bool {
+	t := reflect.TypeOf(dst).Elem()
+	names := make(map[string]bool, t.NumField())
+	for f := range t.Fields() {
+		name, _, _ := strings.Cut(f.Tag.Get("json"), ",")
+		if name == "" {
+			name = f.Name
+		}
+		if name != "-" {
+			names[name] = true
+		}
+	}
+	return names
 }
 
 // mapError converts a calculator error to an HTTP status, error code and
@@ -196,7 +264,7 @@ func mapError(op calculator.Operation, err error) (status int, code, msg string)
 		return http.StatusBadRequest, codeUnexpectedOperand, fmt.Sprintf(`operation %q does not accept field "b"`, op)
 	case errors.Is(err, calculator.ErrDivisionByZero):
 		return http.StatusUnprocessableEntity, codeDivisionByZero, err.Error()
-	case errors.Is(err, calculator.ErrNegativeSqrt):
+	case errors.Is(err, calculator.ErrNegativeSqrt), errors.Is(err, calculator.ErrUndefinedResult):
 		return http.StatusUnprocessableEntity, codeInvalidDomain, err.Error()
 	case errors.Is(err, calculator.ErrNonFiniteResult):
 		return http.StatusUnprocessableEntity, codeResultOutOfRange, err.Error()
