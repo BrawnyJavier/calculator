@@ -118,3 +118,29 @@ Fixed:
 
 This phase added the Makefile, Dockerfile, CI, this file and the README, and updated the phase documents to
 match what was built.
+
+## 5. Final verification and independent review
+
+> Verify the implementation against each requirement in the brief and tell me whether it is ready to submit.
+
+A checklist going through the requirements one by one. Everything was met except two items: the Docker image
+had not been built yet, and nothing was pushed.
+
+> Install Docker and build the image, so the Dockerfile is verified locally and not only in CI.
+
+The assistant installed Colima and the Docker CLI, built the image (16 MB), and ran the same smoke test as CI
+against the container.
+
+> Launch two independent reviewers in parallel: a senior React engineer for `frontend/` and a senior Go
+> engineer for `backend/`, each running a code review of their layer.
+
+Both reviewers judged the code to be at a senior level, and both found real edge-case bugs:
+- **Frontend:** ± after an operator was lost, a request that never answered froze the keypad, and the
+  expression line showed unrounded values.
+- **Backend:** percent overflowed on large inputs, NaN results got the wrong error code, results could be
+  `-0`, duplicate or wrong-case JSON keys were accepted, and validation ran in the wrong order.
+
+> Fix every correctness finding from both reviews. Leave the judgement calls, such as request logging and
+> `t.Parallel()`, out of scope.
+
+Each finding was fixed with a regression test, then checked against a running server and in the browser.
