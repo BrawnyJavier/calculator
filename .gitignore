@@ -1,0 +1,13 @@
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+
+# Go
+backend/coverage.out
+backend/coverage.html
+
+# Node
+node_modules/
+frontend/dist/
+frontend/coverage/
