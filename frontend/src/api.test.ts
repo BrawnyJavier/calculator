@@ -19,6 +19,13 @@ function jsonResponse(body: unknown, status = 200): Response {
   })
 }
 
+/** A fetch that never answers, and rejects with the signal's reason once aborted. */
+function hangingFetch(_url: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return new Promise((_, reject) => {
+    init?.signal?.addEventListener('abort', () => reject(init.signal?.reason))
+  })
+}
+
 async function captureError(promise: Promise<unknown>): Promise<unknown> {
   try {
     await promise
@@ -42,7 +49,10 @@ describe('calculate', () => {
     expect(init?.method).toBe('POST')
     expect(init?.headers).toEqual({ 'Content-Type': 'application/json' })
     expect(JSON.parse(init?.body as string)).toEqual({ operation: 'divide', a: 10, b: 4 })
-    expect(init?.signal).toBe(controller.signal)
+    // The caller's signal is combined with a timeout, so aborting it aborts the request.
+    expect(init?.signal?.aborted).toBe(false)
+    controller.abort()
+    expect(init?.signal?.aborted).toBe(true)
   })
 
   it('does not send b for unary operations', async () => {
@@ -85,6 +95,9 @@ describe('calculate', () => {
     ['no operation', { a: 1, b: 2, result: 3 }],
     ['a non-numeric operand', { operation: 'add', a: '1', b: 2, result: 3 }],
     ['a non-numeric b', { operation: 'add', a: 1, b: null, result: 3 }],
+    ['an unknown operation', { operation: 'modulo', a: 7, b: 3, result: 1 }],
+    ['no b for a binary operation', { operation: 'multiply', a: 7, result: 0 }],
+    ['a b for sqrt', { operation: 'sqrt', a: 16, b: 2, result: 4 }],
     ['a non-object body', [3]],
   ])('throws invalid_response when a successful response has %s', async (_, body) => {
     fetchMock.mockResolvedValue(jsonResponse(body))
@@ -103,19 +116,38 @@ describe('calculate', () => {
     expect(err).toMatchObject({ code: 'network_error', status: undefined })
   })
 
-  it('re-throws AbortError unchanged when the request is aborted', async () => {
-    const abortError = new DOMException('The operation was aborted.', 'AbortError')
-    fetchMock.mockRejectedValue(abortError)
+  it('re-throws AbortError unchanged when the caller aborts', async () => {
+    fetchMock.mockImplementation(hangingFetch)
+    const controller = new AbortController()
 
-    await expect(calculate({ operation: 'add', a: 1, b: 2 })).rejects.toBe(abortError)
+    const promise = calculate({ operation: 'add', a: 1, b: 2 }, controller.signal)
+    controller.abort()
+
+    await expect(promise).rejects.toBe(controller.signal.reason)
+    expect(controller.signal.reason).toMatchObject({ name: 'AbortError' })
   })
 
   it('re-throws AbortError raised while reading the body', async () => {
-    const abortError = new DOMException('The operation was aborted.', 'AbortError')
-    const response = jsonResponse({ result: 3 })
-    vi.spyOn(response, 'json').mockRejectedValue(abortError)
+    const controller = new AbortController()
+    const response = jsonResponse({ operation: 'add', a: 1, b: 2, result: 3 })
+    vi.spyOn(response, 'text').mockImplementation(() => {
+      controller.abort()
+      return Promise.reject(controller.signal.reason)
+    })
     fetchMock.mockResolvedValue(response)
 
-    await expect(calculate({ operation: 'add', a: 1, b: 2 })).rejects.toBe(abortError)
+    const err = await captureError(calculate({ operation: 'add', a: 1, b: 2 }, controller.signal))
+
+    expect(err).toBe(controller.signal.reason)
+    expect(err).toMatchObject({ name: 'AbortError' })
+  })
+
+  it('gives up with a timeout error when the backend does not answer', async () => {
+    fetchMock.mockImplementation(hangingFetch)
+
+    const err = await captureError(calculate({ operation: 'add', a: 1, b: 2 }, new AbortController().signal, 20))
+
+    expect(err).toBeInstanceOf(ApiError)
+    expect(err).toMatchObject({ code: 'timeout', message: expect.stringContaining('too long') })
   })
 })

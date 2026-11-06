@@ -1,5 +1,4 @@
-import type { CalculateResponse } from './api'
-import type { BinaryOperation } from './operations'
+import type { BinaryOperation, Operation } from './operations'
 
 /**
  * Formats a number for display, rounding to 12 significant digits to hide
@@ -28,26 +27,34 @@ const BINARY_SYMBOLS: Record<BinaryOperation, string> = {
   percent: '% of',
 }
 
-// Parenthesise negatives where they would read ambiguously: "2 − (-3)", "(-2) ^ 3".
-function operand(value: number, parenthesiseNegative: boolean): string {
-  return parenthesiseNegative && value < 0 ? `(${value})` : String(value)
+/**
+ * How an operand is shown in the expression line: exactly as typed, or, for a
+ * computed result, rounded the same way as the main display, so the two lines
+ * always agree (0.1 + 0.2 = then + shows "0.3 +", not "0.30000000000000004 +").
+ */
+export function formatOperand(value: number, isResult: boolean): string {
+  return isResult ? formatNumber(value) : String(value)
 }
 
-/** Renders a pending binary operation, e.g. "12 ×". */
-export function formatPending(a: number, operation: BinaryOperation): string {
-  return `${operand(a, operation === 'power')} ${BINARY_SYMBOLS[operation]}`
+// Parenthesise negatives where they would read ambiguously: "2 − (-3)", "(-2) ^ 3", "√(-4)".
+function wrap(label: string, parenthesiseNegative: boolean): string {
+  return parenthesiseNegative && label.startsWith('-') ? `(${label})` : label
+}
+
+/** Renders a pending binary operation from a formatted operand, e.g. "12 ×". */
+export function formatPending(a: string, operation: BinaryOperation): string {
+  return `${wrap(a, operation === 'power')} ${BINARY_SYMBOLS[operation]}`
 }
 
 /**
- * Renders a calculation as a readable expression, e.g. "10 ÷ 4". Operands are
- * shown exactly as sent, without formatNumber's rounding, so the expression
- * never misstates what the user typed.
+ * Renders a calculation from formatted operands (see formatOperand), e.g.
+ * "10 ÷ 4" or "√16". `b` is ignored for sqrt.
  */
-export function formatExpression({ operation, a, b = 0 }: CalculateResponse): string {
+export function formatExpression(operation: Operation, a: string, b = ''): string {
   if (operation === 'sqrt') {
-    return `√${a}` // a is never negative: the backend rejects it
+    return `√${wrap(a, true)}`
   }
-  return `${formatPending(a, operation)} ${operand(b, true)}`
+  return `${formatPending(a, operation)} ${wrap(b, true)}`
 }
 
 /** Capitalises the first letter of a message, e.g. a backend error message. */

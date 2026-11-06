@@ -191,6 +191,35 @@ describe('Calculator', () => {
     expect(screen.getByRole('button', { name: 'Equals' })).not.toHaveAttribute('aria-disabled')
   })
 
+  it('lets AC cancel a calculation that never answers', async () => {
+    calculateMock.mockReturnValue(new Promise(() => {}))
+    const ui = setup()
+
+    await ui.press('2', 'Add', '3', 'Equals')
+    const signal = calculateMock.mock.calls[0][1]!
+    expect(screen.getByRole('button', { name: 'All clear' })).not.toHaveAttribute('aria-disabled')
+
+    await ui.press('All clear')
+    expect(signal.aborted).toBe(true)
+    expect(ui.display()).toHaveTextContent('0')
+    expect(ui.expression()).toHaveTextContent('')
+
+    // The keypad works again.
+    calculateMock.mockImplementation(fakeBackend)
+    await ui.press('4', 'Multiply', '5', 'Equals')
+    expect(ui.display()).toHaveTextContent('20')
+  })
+
+  it('makes ± after an operator negate the next operand', async () => {
+    const ui = setup()
+
+    await ui.press('1', '2', 'Add', 'Toggle sign', '5', 'Equals')
+
+    expect(calculateMock).toHaveBeenCalledWith({ operation: 'add', a: 12, b: -5 }, expect.any(AbortSignal))
+    expect(ui.display()).toHaveTextContent('7')
+    expect(ui.expression()).toHaveTextContent('12 + (-5) =')
+  })
+
   it('supports the keyboard', async () => {
     const ui = setup()
 

@@ -102,7 +102,7 @@ export function Calculator() {
     requestRef.current?.abort()
     const controller = new AbortController()
     requestRef.current = controller
-    dispatch({ type: 'requestStarted' })
+    dispatch({ type: 'requestStarted', request })
     try {
       const response = await calculate(request, controller.signal)
       dispatch({ type: 'requestSucceeded', response })
@@ -117,12 +117,15 @@ export function Calculator() {
     }
   }
 
+  // While a request is in flight the reducer ignores every key but AC, and
+  // buildRequest returns null, so no second request can start.
   async function press(key: KeyDef) {
-    if (state.status === 'loading') return
     const { press } = key
 
     switch (press.kind) {
       case 'input':
+        // AC also cancels a calculation in flight (the way out of a slow one).
+        if (press.action.type === 'clear') requestRef.current?.abort()
         dispatch(press.action)
         return
       case 'operator': {
@@ -215,7 +218,7 @@ export function Calculator() {
                 .join(' ')}
               aria-label={key.ariaLabel}
               aria-pressed={key.variant === 'operator' ? active : undefined}
-              aria-disabled={loading || undefined}
+              aria-disabled={(loading && key.id !== 'clear') || undefined}
               onClick={() => void press(key)}
             >
               {key.label}

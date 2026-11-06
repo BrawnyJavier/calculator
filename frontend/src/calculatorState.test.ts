@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import type { CalculateResponse } from './api'
 import {
   buildRequest,
   calculatorReducer,
@@ -28,8 +29,21 @@ function type(input: string, state: CalculatorState = initialState): CalculatorS
   )
 }
 
-const succeeded = (state: CalculatorState, response: Parameters<typeof calculatorReducer>[1] & { type: 'requestSucceeded' }) =>
-  calculatorReducer(calculatorReducer(state, { type: 'requestStarted' }), response)
+/** Starts the request "=" (or √) would send from `state`. */
+function started(state: CalculatorState, unary?: 'sqrt'): CalculatorState {
+  const request = buildRequest(state, unary)
+  if (!request) throw new Error('nothing to calculate')
+  return calculatorReducer(state, { type: 'requestStarted', request })
+}
+
+function succeeded(state: CalculatorState, result: number, unary?: 'sqrt'): CalculatorState {
+  const loading = started(state, unary)
+  const response: CalculateResponse = { ...loading.request!, result }
+  return calculatorReducer(loading, { type: 'requestSucceeded', response })
+}
+
+const failed = (state: CalculatorState, message: string, unary?: 'sqrt') =>
+  calculatorReducer(started(state, unary), { type: 'requestFailed', message })
 
 describe('entering numbers', () => {
   it('starts at 0 and replaces the leading zero', () => {
@@ -53,6 +67,24 @@ describe('entering numbers', () => {
     expect(type('5~~').display).toBe('5')
     expect(type('~').display).toBe('0')
     expect(type('0.~').display).toBe('-0.')
+  })
+
+  it('starts a negative right operand when ± follows an operator', () => {
+    const s = type('12+~')
+    expect(s).toMatchObject({ display: '-0', entered: true, expression: '12 +', operand: 12 })
+    expect(buildRequest(type('5', s))).toEqual({ operation: 'add', a: 12, b: -5 })
+  })
+
+  it('negates a result and drops its now-wrong expression', () => {
+    const s = type('~', succeeded(type('2+3'), 5))
+    expect(s).toMatchObject({ display: '-5', expression: '', isResult: true })
+    expect(type('*', s)).toMatchObject({ operand: -5, expression: '-5 ×' })
+  })
+
+  it('negates a √ result used as the right operand, keeping the pending operation', () => {
+    const s = type('~', succeeded(type('9+16'), 4, 'sqrt'))
+    expect(s).toMatchObject({ display: '-4', expression: '9 +', operation: 'add' })
+    expect(buildRequest(s)).toEqual({ operation: 'add', a: 9, b: -4 })
   })
 
   it('replaces "-0" with the next digit', () => {
@@ -121,65 +153,79 @@ describe('requests', () => {
 })
 
 describe('results', () => {
-  const response = { operation: 'divide', a: 10, b: 4, result: 2.5 } as const
-
   it('shows the result and the full expression', () => {
-    const s = succeeded(type('10/4'), { type: 'requestSucceeded', response })
-    expect(s).toMatchObject({ display: '2.5', isResult: true, overwrite: true, operation: null, status: 'ready', expression: '10 ÷ 4 =' })
+    const s = succeeded(type('10/4'), 2.5)
+    expect(s).toMatchObject({ display: '2.5', isResult: true, overwrite: true, operation: null, status: 'ready', request: null, expression: '10 ÷ 4 =' })
   })
 
   it('keeps the exact result for further calculations', () => {
-    const s = succeeded(type('1/3'), { type: 'requestSucceeded', response: { operation: 'divide', a: 1, b: 3, result: 1 / 3 } })
-    expect(type('*', s).operand).toBe(1 / 3)
+    expect(type('*', succeeded(type('1/3'), 1 / 3)).operand).toBe(1 / 3)
+  })
+
+  it('shows a result used as an operand rounded, as on the display', () => {
+    const s = type('+', succeeded(type('.1+.2'), 0.1 + 0.2))
+    expect(s).toMatchObject({ operand: 0.1 + 0.2, expression: '0.3 +' })
+    expect(succeeded(type('5', s), 5.3).expression).toBe('0.3 + 5 =')
+  })
+
+  it('shows typed operands exactly, without rounding', () => {
+    expect(succeeded(type('.1234567890123+1'), 1.1234567890123).expression).toBe('0.1234567890123 + 1 =')
   })
 
   it('starts a new calculation when a digit follows a result', () => {
-    const s = type('7', succeeded(type('10/4'), { type: 'requestSucceeded', response }))
+    const s = type('7', succeeded(type('10/4'), 2.5))
     expect(s).toMatchObject({ display: '7', isResult: false, expression: '' })
   })
 
   it('continues from the result when an operator follows it', () => {
-    const s = type('+', succeeded(type('10/4'), { type: 'requestSucceeded', response }))
+    const s = type('+', succeeded(type('10/4'), 2.5))
     // Still flagged as a result, so the display keeps showing it rounded.
     expect(s).toMatchObject({ operand: 2.5, operation: 'add', expression: '2.5 +', isResult: true })
     expect(type('3', s).isResult).toBe(false)
   })
 
   it('applies √ to the right operand and keeps the pending operation', () => {
-    const s = succeeded(type('9+16'), {
-      type: 'requestSucceeded',
-      response: { operation: 'sqrt', a: 16, result: 4 },
-    })
+    const s = succeeded(type('9+16'), 4, 'sqrt')
     expect(s).toMatchObject({ display: '4', operand: 9, operation: 'add', entered: true, expression: '9 +' })
     expect(buildRequest(s)).toEqual({ operation: 'add', a: 9, b: 4 })
+    expect(succeeded(s, 13).expression).toBe('9 + 4 =')
   })
 
-  it('ignores input while loading', () => {
-    const loading = calculatorReducer(type('1+2'), { type: 'requestStarted' })
-    expect(loading.status).toBe('loading')
+  it('ignores input while loading, except AC', () => {
+    const loading = started(type('1+2'))
+    expect(loading).toMatchObject({ status: 'loading', request: { operation: 'add', a: 1, b: 2 } })
     expect(type('5', loading)).toBe(loading)
-    expect(calculatorReducer(loading, { type: 'clear' })).toBe(loading)
+    expect(type('~+<', loading)).toBe(loading)
+    expect(calculatorReducer(loading, { type: 'clear' })).toEqual(initialState)
+  })
+
+  it('ignores a response that arrives after AC', () => {
+    const cleared = calculatorReducer(started(type('1+2')), { type: 'clear' })
+    const response = { operation: 'add', a: 1, b: 2, result: 3 } as const
+    expect(calculatorReducer(cleared, { type: 'requestSucceeded', response })).toBe(cleared)
+    expect(calculatorReducer(cleared, { type: 'requestFailed', message: 'late' })).toBe(cleared)
   })
 })
 
 describe('errors', () => {
-  const failed = calculatorReducer(calculatorReducer(type('1/0'), { type: 'requestStarted' }), {
-    type: 'requestFailed',
-    message: 'Cannot divide by zero',
+  const divByZero = failed(type('1/0'), 'Cannot divide by zero')
+
+  it('shows the message and the calculation that failed', () => {
+    expect(divByZero).toMatchObject({ status: 'error', error: 'Cannot divide by zero', expression: '1 ÷ 0 =', operation: null, request: null })
   })
 
-  it('shows the message and keeps the attempted expression', () => {
-    expect(failed).toMatchObject({ status: 'error', error: 'Cannot divide by zero', expression: '1 ÷', operation: null })
+  it('shows a failed √ on the right operand as such, not as the dropped pending operation', () => {
+    expect(failed(type('9+4~'), 'Negative', 'sqrt')).toMatchObject({ status: 'error', expression: '√(-4) =', operation: null })
   })
 
   it('starts fresh on the next digit or decimal point', () => {
-    expect(type('8', failed)).toMatchObject({ display: '8', status: 'ready', error: null, expression: '' })
-    expect(type('.', failed)).toMatchObject({ display: '0.', status: 'ready' })
+    expect(type('8', divByZero)).toMatchObject({ display: '8', status: 'ready', error: null, expression: '' })
+    expect(type('.', divByZero)).toMatchObject({ display: '0.', status: 'ready' })
   })
 
   it('clears on backspace and ignores operators and ±', () => {
-    expect(type('<', failed)).toEqual(initialState)
-    expect(type('+', failed)).toBe(failed)
-    expect(type('~', failed)).toBe(failed)
+    expect(type('<', divByZero)).toEqual(initialState)
+    expect(type('+', divByZero)).toBe(divByZero)
+    expect(type('~', divByZero)).toBe(divByZero)
   })
 })

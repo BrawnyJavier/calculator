@@ -1,5 +1,5 @@
 import type { CalculateRequest, CalculateResponse } from './api'
-import { formatExpression, formatPending } from './format'
+import { formatExpression, formatOperand, formatPending } from './format'
 import type { BinaryOperation } from './operations'
 import { parseOperand } from './validation'
 
@@ -24,6 +24,8 @@ export interface CalculatorState {
   overwrite: boolean
   /** Left operand of the pending binary operation. */
   operand: number | null
+  /** `operand` as shown in the expression line (rounded if it was a result). */
+  operandLabel: string
   operation: BinaryOperation | null
   /** Whether a right operand has been entered for the pending operation. */
   entered: boolean
@@ -31,6 +33,8 @@ export interface CalculatorState {
   expression: string
   status: 'ready' | 'loading' | 'error'
   error: string | null
+  /** The request in flight while status is 'loading'. */
+  request: CalculateRequest | null
 }
 
 export const initialState: CalculatorState = {
@@ -38,11 +42,13 @@ export const initialState: CalculatorState = {
   isResult: false,
   overwrite: true,
   operand: null,
+  operandLabel: '',
   operation: null,
   entered: false,
   expression: '',
   status: 'ready',
   error: null,
+  request: null,
 }
 
 export type CalculatorAction =
@@ -52,13 +58,14 @@ export type CalculatorAction =
   | { type: 'backspace' }
   | { type: 'clear' }
   | { type: 'operator'; operation: BinaryOperation }
-  | { type: 'requestStarted' }
+  | { type: 'requestStarted'; request: CalculateRequest }
   | { type: 'requestSucceeded'; response: CalculateResponse }
   | { type: 'requestFailed'; message: string }
 
 export function calculatorReducer(state: CalculatorState, action: CalculatorAction): CalculatorState {
-  // Ignore input while a calculation is in flight.
-  if (state.status === 'loading' && action.type !== 'requestSucceeded' && action.type !== 'requestFailed') {
+  // Ignore input while a calculation is in flight, except AC: the caller
+  // aborts the request, and AC is the way out of a slow or hung one.
+  if (state.status === 'loading' && action.type !== 'clear' && action.type !== 'requestSucceeded' && action.type !== 'requestFailed') {
     return state
   }
 
@@ -91,9 +98,17 @@ export function calculatorReducer(state: CalculatorState, action: CalculatorActi
     }
 
     case 'toggleSign': {
-      if (state.status === 'error' || state.display === '0') return state
+      if (state.status === 'error') return state
+      // Right after an operator ("12 +"), ± starts the right operand as "-0",
+      // so "12 + ± 5 =" is 12 + (-5); the left operand on screen is untouched.
+      if (state.operation && !state.entered) {
+        return { ...state, display: '-0', isResult: false, overwrite: false, entered: true }
+      }
+      if (state.display === '0') return state
       const display = state.display.startsWith('-') ? state.display.slice(1) : `-${state.display}`
-      return { ...state, display }
+      // Negating a result makes the old "2 + 3 =" line wrong, so drop it,
+      // unless it is the pending "9 +" of an operation still in progress.
+      return { ...state, display, expression: state.operation ? state.expression : '' }
     }
 
     case 'backspace': {
@@ -111,41 +126,41 @@ export function calculatorReducer(state: CalculatorState, action: CalculatorActi
       if (state.status === 'error') return state
       // Changing your mind: "12 +" then "×" gives "12 ×".
       if (state.operation && state.operand !== null && !state.entered) {
-        return { ...state, operation: action.operation, expression: formatPending(state.operand, action.operation) }
+        return { ...state, operation: action.operation, expression: formatPending(state.operandLabel, action.operation) }
       }
       const parsed = parseOperand(state.display)
       if (!parsed.ok) return state
+      const operandLabel = formatOperand(parsed.value, state.isResult)
       return {
         ...state,
         operand: parsed.value,
+        operandLabel,
         operation: action.operation,
         entered: false,
         overwrite: true,
         // isResult is kept, so a result stays rounded while it is the left operand.
-        expression: formatPending(parsed.value, action.operation),
+        expression: formatPending(operandLabel, action.operation),
       }
     }
 
     case 'requestStarted':
-      return { ...state, status: 'loading', error: null }
+      return { ...state, status: 'loading', error: null, request: action.request }
 
     case 'requestSucceeded': {
-      const { response } = action
-      const display = String(response.result)
+      if (state.status !== 'loading' || !state.request) return state
+      const display = String(action.response.result)
       // √ applied to the right operand keeps the pending operation: "9 + √16" → "9 + 4".
-      if (response.operation === 'sqrt' && state.operation) {
-        return { ...state, display, isResult: true, overwrite: true, entered: true, status: 'ready' }
+      if (state.request.operation === 'sqrt' && state.operation) {
+        return { ...state, display, isResult: true, overwrite: true, entered: true, status: 'ready', request: null }
       }
-      return {
-        ...initialState,
-        display,
-        isResult: true,
-        expression: `${formatExpression(response)} =`,
-      }
+      return { ...initialState, display, isResult: true, expression: `${describe(state, state.request)} =` }
     }
 
-    case 'requestFailed':
-      return { ...initialState, status: 'error', error: action.message, expression: state.expression }
+    case 'requestFailed': {
+      if (state.status !== 'loading' || !state.request) return state
+      // Show what failed ("1 ÷ 0 =", "√(-4) ="); the pending operation is dropped.
+      return { ...initialState, status: 'error', error: action.message, expression: `${describe(state, state.request)} =` }
+    }
   }
 }
 
@@ -169,6 +184,17 @@ export function buildRequest(state: CalculatorState, unary?: 'sqrt'): CalculateR
 /** Whether pressing an operator must first evaluate the pending operation. */
 export function shouldChain(state: CalculatorState): boolean {
   return state.operation !== null && state.entered
+}
+
+/**
+ * Renders the calculation `request` performs, from what is on screen: the
+ * entry on the display is always the request's last operand.
+ */
+function describe(state: CalculatorState, request: CalculateRequest): string {
+  const entry = formatOperand(Number(state.display), state.isResult)
+  return request.operation === 'sqrt'
+    ? formatExpression('sqrt', entry)
+    : formatExpression(request.operation, state.operandLabel, entry)
 }
 
 function countDigits(display: string): number {
