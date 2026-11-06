@@ -1,7 +1,7 @@
-import { render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { ApiError, calculate, type CalculateResponse } from '../api'
+import { ApiError, calculate, type CalculateRequest, type CalculateResponse } from '../api'
 import { Calculator } from './Calculator'
 
 vi.mock('../api', async (importOriginal) => ({
@@ -11,20 +11,38 @@ vi.mock('../api', async (importOriginal) => ({
 
 const calculateMock = vi.mocked(calculate)
 
+/** A fake backend that does the arithmetic locally. */
+function fakeBackend(request: CalculateRequest): Promise<CalculateResponse> {
+  const { operation, a, b = 0 } = request
+  const result = {
+    add: a + b,
+    subtract: a - b,
+    multiply: a * b,
+    divide: a / b,
+    power: a ** b,
+    sqrt: Math.sqrt(a),
+    percent: (a * b) / 100,
+  }[operation]
+  return Promise.resolve({ ...request, result })
+}
+
 beforeEach(() => {
   calculateMock.mockReset()
+  calculateMock.mockImplementation(fakeBackend)
 })
 
 function setup() {
   const user = userEvent.setup()
-  render(<Calculator />)
+  const utils = render(<Calculator />)
   return {
+    ...utils,
     user,
-    first: () => screen.getByRole('textbox', { name: /first number|^number$/i }),
-    second: () => screen.queryByRole('textbox', { name: 'Second number' }),
-    operation: (name: string) => screen.getByRole('radio', { name }),
-    submit: () => screen.getByRole('button', { name: /calculat/i }),
-    output: () => screen.getByRole('status'),
+    /** Clicks keys by accessible name, e.g. press('1', '0', 'Divide', '4', 'Equals'). */
+    press: async (...names: string[]) => {
+      for (const name of names) await user.click(screen.getByRole('button', { name }))
+    },
+    display: () => screen.getByTestId('display'),
+    expression: () => screen.getByTestId('expression'),
   }
 }
 
@@ -39,173 +57,190 @@ function deferred<T>() {
 }
 
 describe('Calculator', () => {
-  it('renders both inputs, every operation and the submit button', () => {
+  it('renders a display and every key', () => {
     const ui = setup()
 
-    expect(ui.first()).toBeInTheDocument()
-    expect(ui.second()).toBeInTheDocument()
-    for (const name of ['Add', 'Subtract', 'Multiply', 'Divide', 'Power', 'Square root', 'Percent of']) {
-      expect(ui.operation(name)).toBeInTheDocument()
+    expect(ui.display()).toHaveTextContent('0')
+    for (const name of [
+      'All clear', 'Backspace', 'Percent of', 'Divide', 'Square root', 'Power', 'Toggle sign', 'Multiply',
+      'Subtract', 'Add', 'Equals', 'Decimal point', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
+    ]) {
+      expect(screen.getByRole('button', { name })).toBeInTheDocument()
     }
-    expect(ui.operation('Add')).toBeChecked()
-    expect(ui.submit()).toBeEnabled()
-    expect(ui.output()).toBeEmptyDOMElement()
   })
 
-  it('hides the second input for square root and shows it again for binary operations', async () => {
+  it('calculates a binary operation via the API and shows the result', async () => {
     const ui = setup()
 
-    await ui.user.click(ui.operation('Square root'))
-    expect(ui.second()).not.toBeInTheDocument()
-    expect(screen.getByRole('textbox', { name: 'Number' })).toBeInTheDocument()
+    await ui.press('1', '0', 'Divide')
+    expect(ui.expression()).toHaveTextContent('10 ÷')
+    expect(screen.getByRole('button', { name: 'Divide' })).toHaveAttribute('aria-pressed', 'true')
 
-    await ui.user.click(ui.operation('Add'))
-    expect(ui.second()).toBeInTheDocument()
-  })
-
-  it('shows field errors and does not call the API for invalid input', async () => {
-    const ui = setup()
-
-    await ui.user.type(ui.second()!, 'abc')
-    await ui.user.click(ui.submit())
-
-    expect(ui.first()).toHaveAccessibleDescription('Enter a number')
-    expect(ui.first()).toHaveAttribute('aria-invalid', 'true')
-    expect(ui.second()).toHaveAccessibleDescription('Enter a valid number')
-    expect(calculateMock).not.toHaveBeenCalled()
-  })
-
-  it('clears a field error when that field is edited', async () => {
-    const ui = setup()
-
-    await ui.user.click(ui.submit())
-    expect(ui.first()).toHaveAccessibleDescription('Enter a number')
-
-    await ui.user.type(ui.first(), '1')
-    expect(ui.first()).not.toHaveAttribute('aria-invalid')
-    expect(ui.second()).toHaveAccessibleDescription('Enter a number')
-  })
-
-  it('submits a valid calculation and shows the result', async () => {
-    calculateMock.mockResolvedValue({ operation: 'divide', a: 10, b: 4, result: 2.5 })
-    const ui = setup()
-
-    await ui.user.type(ui.first(), '10')
-    await ui.user.click(ui.operation('Divide'))
-    await ui.user.type(ui.second()!, '4')
-    await ui.user.click(ui.submit())
+    await ui.press('4', 'Equals')
 
     expect(calculateMock).toHaveBeenCalledWith({ operation: 'divide', a: 10, b: 4 }, expect.any(AbortSignal))
-    expect(await screen.findByText('2.5')).toBeInTheDocument()
-    expect(ui.output()).toHaveTextContent('10 ÷ 4 = 2.5')
+    expect(ui.display()).toHaveTextContent('2.5')
+    expect(ui.expression()).toHaveTextContent('10 ÷ 4 =')
+    expect(screen.getByRole('status')).toHaveTextContent('10 ÷ 4 = 2.5')
   })
 
-  it('sends only one operand for square root', async () => {
-    calculateMock.mockResolvedValue({ operation: 'sqrt', a: 16, result: 4 })
+  it('rounds floating-point noise in results', async () => {
     const ui = setup()
 
-    await ui.user.type(ui.second()!, '99')
-    await ui.user.click(ui.operation('Square root'))
-    await ui.user.type(screen.getByRole('textbox', { name: 'Number' }), '16')
-    await ui.user.click(ui.submit())
+    await ui.press('0', 'Decimal point', '1', 'Add', '0', 'Decimal point', '2', 'Equals')
+
+    expect(ui.display()).toHaveTextContent(/^0\.3$/)
+  })
+
+  it('chains operations, evaluating the pending one first', async () => {
+    const ui = setup()
+
+    await ui.press('2', 'Add', '3', 'Multiply')
+    expect(calculateMock).toHaveBeenLastCalledWith({ operation: 'add', a: 2, b: 3 }, expect.any(AbortSignal))
+    expect(ui.expression()).toHaveTextContent('5 ×')
+
+    await ui.press('4', 'Equals')
+    expect(calculateMock).toHaveBeenLastCalledWith({ operation: 'multiply', a: 5, b: 4 }, expect.any(AbortSignal))
+    expect(ui.display()).toHaveTextContent('20')
+  })
+
+  it('calculates a square root of the current entry', async () => {
+    const ui = setup()
+
+    await ui.press('1', '6', 'Square root')
 
     expect(calculateMock).toHaveBeenCalledWith({ operation: 'sqrt', a: 16 }, expect.any(AbortSignal))
-    expect(await screen.findByText('4')).toBeInTheDocument()
+    expect(ui.display()).toHaveTextContent('4')
+    expect(ui.expression()).toHaveTextContent('√16 =')
   })
 
-  it('submits with the Enter key', async () => {
-    calculateMock.mockResolvedValue({ operation: 'add', a: 2, b: 3, result: 5 })
+  it('supports percent, power and the sign toggle', async () => {
     const ui = setup()
 
-    await ui.user.type(ui.first(), '2')
-    await ui.user.type(ui.second()!, '3{Enter}')
+    await ui.press('1', '5', 'Percent of', '2', '0', '0', 'Equals')
+    expect(ui.display()).toHaveTextContent('30')
 
-    expect(await screen.findByText('5')).toBeInTheDocument()
+    await ui.press('2', 'Toggle sign', 'Power', '3', 'Equals')
+    expect(calculateMock).toHaveBeenLastCalledWith({ operation: 'power', a: -2, b: 3 }, expect.any(AbortSignal))
+    expect(ui.display()).toHaveTextContent('-8')
+  })
+
+  it('edits with backspace and all clear', async () => {
+    const ui = setup()
+
+    await ui.press('1', '2', '3', 'Backspace')
+    expect(ui.display()).toHaveTextContent('12')
+
+    await ui.press('Add', 'All clear')
+    expect(ui.display()).toHaveTextContent('0')
+    expect(ui.expression()).toBeEmptyDOMElement()
+  })
+
+  it('does nothing on "=" without a pending operation', async () => {
+    const ui = setup()
+
+    await ui.press('7', 'Equals')
+
+    expect(calculateMock).not.toHaveBeenCalled()
+    expect(ui.display()).toHaveTextContent('7')
   })
 
   it('shows the backend error message', async () => {
     calculateMock.mockRejectedValue(new ApiError('division_by_zero', 'cannot divide by zero', 422))
     const ui = setup()
 
-    await ui.user.type(ui.first(), '1')
-    await ui.user.type(ui.second()!, '0')
-    await ui.user.click(ui.submit())
+    await ui.press('1', 'Divide', '0', 'Equals')
 
-    expect(await screen.findByText('Cannot divide by zero')).toBeInTheDocument()
+    expect(ui.display()).toHaveTextContent('Cannot divide by zero')
+    expect(screen.getByRole('status')).toHaveTextContent('Cannot divide by zero')
   })
 
   it('shows a generic message for unexpected errors', async () => {
     calculateMock.mockRejectedValue(new Error('boom'))
     const ui = setup()
 
-    await ui.user.type(ui.first(), '1')
-    await ui.user.type(ui.second()!, '2')
-    await ui.user.click(ui.submit())
+    await ui.press('1', 'Add', '2', 'Equals')
 
-    expect(await screen.findByText('Something went wrong. Please try again.')).toBeInTheDocument()
+    expect(ui.display()).toHaveTextContent('Something went wrong. Please try again.')
   })
 
-  it('disables the button while the request is pending', async () => {
+  it('stops chaining when the pending calculation fails', async () => {
+    calculateMock.mockRejectedValue(new ApiError('division_by_zero', 'cannot divide by zero', 422))
+    const ui = setup()
+
+    await ui.press('1', 'Divide', '0', 'Add')
+
+    expect(calculateMock).toHaveBeenCalledOnce()
+    expect(ui.display()).toHaveTextContent('Cannot divide by zero')
+  })
+
+  it('ignores keys while a calculation is pending', async () => {
     const pending = deferred<CalculateResponse>()
     calculateMock.mockReturnValue(pending.promise)
     const ui = setup()
 
-    await ui.user.type(ui.first(), '2')
-    await ui.user.type(ui.second()!, '3')
-    await ui.user.click(ui.submit())
+    await ui.press('2', 'Add', '3', 'Equals')
+    expect(screen.getByRole('button', { name: 'Equals' })).toHaveAttribute('aria-disabled', 'true')
 
-    expect(ui.submit()).toBeDisabled()
-    expect(ui.submit()).toHaveTextContent('Calculating…')
+    await ui.press('9', 'Equals')
+    expect(calculateMock).toHaveBeenCalledOnce()
+    expect(ui.display()).toHaveTextContent('3')
 
-    pending.resolve({ operation: 'add', a: 2, b: 3, result: 5 })
-    expect(await screen.findByText('5')).toBeInTheDocument()
-    expect(ui.submit()).toBeEnabled()
-    expect(ui.submit()).toHaveTextContent('Calculate')
+    await act(async () => pending.resolve({ operation: 'add', a: 2, b: 3, result: 5 }))
+    expect(ui.display()).toHaveTextContent('5')
+    expect(screen.getByRole('button', { name: 'Equals' })).not.toHaveAttribute('aria-disabled')
   })
 
-  it('clears the previous result when an input changes', async () => {
-    calculateMock.mockResolvedValue({ operation: 'add', a: 2, b: 3, result: 5 })
+  it('supports the keyboard', async () => {
     const ui = setup()
 
-    await ui.user.type(ui.first(), '2')
-    await ui.user.type(ui.second()!, '3')
-    await ui.user.click(ui.submit())
-    expect(await screen.findByText('5')).toBeInTheDocument()
+    await ui.user.keyboard('12*3{Enter}')
+    expect(calculateMock).toHaveBeenLastCalledWith({ operation: 'multiply', a: 12, b: 3 }, expect.any(AbortSignal))
+    expect(ui.display()).toHaveTextContent('36')
 
-    await ui.user.type(ui.first(), '1')
-    expect(ui.output()).toBeEmptyDOMElement()
+    await ui.user.keyboard('9r')
+    expect(ui.display()).toHaveTextContent('3')
+
+    await ui.user.keyboard('45{Backspace}')
+    expect(ui.display()).toHaveTextContent('4')
+
+    await ui.user.keyboard('{Escape}')
+    expect(ui.display()).toHaveTextContent('0')
   })
 
-  it('cancels an in-flight request and ignores its answer when inputs change', async () => {
-    const pending = deferred<CalculateResponse>()
-    calculateMock.mockReturnValue(pending.promise)
+  it('ignores keyboard shortcuts with modifier keys and unmapped keys', async () => {
     const ui = setup()
 
-    await ui.user.type(ui.first(), '2')
-    await ui.user.type(ui.second()!, '3')
-    await ui.user.click(ui.submit())
-    const signal = calculateMock.mock.calls[0][1]!
+    fireEvent.keyDown(window, { key: '5', ctrlKey: true })
+    fireEvent.keyDown(window, { key: 'q' })
 
-    await ui.user.click(ui.operation('Multiply'))
-    expect(signal.aborted).toBe(true)
-    expect(ui.submit()).toBeEnabled()
+    expect(ui.display()).toHaveTextContent('0')
+  })
 
-    pending.reject(new DOMException('aborted', 'AbortError'))
-    await Promise.resolve()
-    expect(ui.output()).toBeEmptyDOMElement()
+  it('briefly highlights a key pressed on the keyboard', async () => {
+    vi.useFakeTimers()
+    try {
+      render(<Calculator />)
+      const seven = screen.getByRole('button', { name: '7' })
+
+      fireEvent.keyDown(window, { key: '7' })
+      expect(seven).toHaveClass('key--flash')
+
+      act(() => vi.advanceTimersByTime(200))
+      expect(seven).not.toHaveClass('key--flash')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('aborts the in-flight request on unmount', async () => {
     calculateMock.mockReturnValue(new Promise(() => {}))
-    const user = userEvent.setup()
-    const { unmount } = render(<Calculator />)
+    const ui = setup()
 
-    await user.type(screen.getByRole('textbox', { name: 'First number' }), '2')
-    await user.type(screen.getByRole('textbox', { name: 'Second number' }), '3')
-    await user.click(screen.getByRole('button', { name: 'Calculate' }))
+    await ui.press('2', 'Add', '3', 'Equals')
     const signal = calculateMock.mock.calls[0][1]!
 
-    unmount()
+    ui.unmount()
     expect(signal.aborted).toBe(true)
   })
 })

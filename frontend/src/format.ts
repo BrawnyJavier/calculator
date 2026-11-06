@@ -1,12 +1,37 @@
 import type { CalculateResponse } from './api'
+import type { BinaryOperation } from './operations'
 
 /**
  * Formats a number for display, rounding to 12 significant digits to hide
- * binary floating-point noise (0.1 + 0.2 shows as 0.3). The API still returns
- * the exact float64 value.
+ * binary floating-point noise (0.1 + 0.2 shows as 0.3), and switching to
+ * scientific notation when the result would not fit the display. The API
+ * still returns the exact float64 value.
  */
 export function formatNumber(value: number): string {
-  return String(Number(value.toPrecision(12)))
+  const rounded = Number(value.toPrecision(12))
+  const text = String(rounded)
+  return text.length > MAX_DISPLAY_LENGTH ? rounded.toExponential() : text
+}
+
+const MAX_DISPLAY_LENGTH = 16
+
+const BINARY_SYMBOLS: Record<BinaryOperation, string> = {
+  add: '+',
+  subtract: '−',
+  multiply: '×',
+  divide: '÷',
+  power: '^',
+  percent: '% of',
+}
+
+// Parenthesise negatives where they would read ambiguously: "2 − (-3)", "(-2) ^ 3".
+function operand(value: number, parenthesiseNegative: boolean): string {
+  return parenthesiseNegative && value < 0 ? `(${value})` : String(value)
+}
+
+/** Renders a pending binary operation, e.g. "12 ×". */
+export function formatPending(a: number, operation: BinaryOperation): string {
+  return `${operand(a, operation === 'power')} ${BINARY_SYMBOLS[operation]}`
 }
 
 /**
@@ -15,26 +40,10 @@ export function formatNumber(value: number): string {
  * never misstates what the user typed.
  */
 export function formatExpression({ operation, a, b = 0 }: CalculateResponse): string {
-  const x = String(a)
-  // Parenthesise a negative right operand so "2 − (-3)" stays unambiguous.
-  const y = b < 0 ? `(${b})` : String(b)
-
-  switch (operation) {
-    case 'add':
-      return `${x} + ${y}`
-    case 'subtract':
-      return `${x} − ${y}`
-    case 'multiply':
-      return `${x} × ${y}`
-    case 'divide':
-      return `${x} ÷ ${y}`
-    case 'power':
-      return `${a < 0 ? `(${x})` : x} ^ ${y}`
-    case 'sqrt':
-      return `√${x}` // a is never negative: the backend rejects it
-    case 'percent':
-      return `${x}% of ${y}`
+  if (operation === 'sqrt') {
+    return `√${a}` // a is never negative: the backend rejects it
   }
+  return `${formatPending(a, operation)} ${operand(b, true)}`
 }
 
 /** Capitalises the first letter of a message, e.g. a backend error message. */

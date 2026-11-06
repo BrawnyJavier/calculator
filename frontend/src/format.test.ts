@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { capitalize, formatExpression, formatNumber } from './format'
+import { capitalize, formatExpression, formatNumber, formatPending } from './format'
 
 describe('formatNumber', () => {
   it.each([
@@ -11,6 +11,9 @@ describe('formatNumber', () => {
     [1e21, '1e+21'],
     [1e-7, '1e-7'],
     [-0, '0'],
+    [975461057789971100, '9.7546105779e+17'],
+    [-0.000000123456789123, '-1.23456789123e-7'],
+    [1234567890123456, '1234567890120000'],
   ])('formats %d as %s', (value, expected) => {
     expect(formatNumber(value)).toBe(expected)
   })
@@ -25,7 +28,7 @@ describe('formatExpression', () => {
     [{ operation: 'power', a: 2, b: 10, result: 1024 }, '2 ^ 10'],
     [{ operation: 'power', a: -2, b: 3, result: -8 }, '(-2) ^ 3'],
     [{ operation: 'sqrt', a: 16, result: 4 }, '√16'],
-    [{ operation: 'percent', a: 15, b: 200, result: 30 }, '15% of 200'],
+    [{ operation: 'percent', a: 15, b: 200, result: 30 }, '15 % of 200'],
   ] as const)('formats %o as %s', (response, expected) => {
     expect(formatExpression(response)).toBe(expected)
   })
@@ -37,6 +40,17 @@ describe('formatExpression', () => {
     expect(formatExpression({ operation: 'add', a: 0.1234567890123, b: 1, result: 1.1234567890123 })).toBe(
       '0.1234567890123 + 1',
     )
+  })
+})
+
+describe('formatPending', () => {
+  it.each([
+    [12, 'multiply', '12 ×'],
+    [15, 'percent', '15 % of'],
+    [-2, 'power', '(-2) ^'],
+    [-2, 'add', '-2 +'],
+  ] as const)('formats %d %s as %s', (a, operation, expected) => {
+    expect(formatPending(a, operation)).toBe(expected)
   })
 })
 

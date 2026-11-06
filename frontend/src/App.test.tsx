@@ -6,6 +6,7 @@ describe('App', () => {
   it('renders the heading and the calculator', () => {
     render(<App />)
     expect(screen.getByRole('heading', { name: 'Calculator' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Calculate' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Calculator' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Equals' })).toBeInTheDocument()
   })
 })
