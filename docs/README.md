@@ -89,13 +89,13 @@ Error body — always the same shape:
 
 | Case | Status | `code` |
 |---|---|---|
-| Malformed JSON, unknown field, wrong type, body > 1 KB, trailing data | 400 | `invalid_request` |
-| Unknown operation | 400 | `unknown_operation` |
+| Malformed JSON, unknown or duplicate field, wrong type, number beyond float64, body > 1 KB, trailing data, missing `operation` | 400 | `invalid_request` |
+| Unknown operation (checked before the operands) | 400 | `unknown_operation` |
 | Missing `a`, or missing `b` for a binary op | 400 | `missing_operand` |
 | `b` supplied for `sqrt` | 400 | `unexpected_operand` |
-| Square root of a negative number | 422 | `invalid_domain` |
+| Square root of a negative number, or a NaN result (`(-8) ^ 0.5`) | 422 | `invalid_domain` |
 | Division by zero, including 0 raised to a negative power | 422 | `division_by_zero` |
-| Result is ±Inf or NaN (overflow, e.g. `1e308 * 10`; `(-8) ^ 0.5`) | 422 | `result_out_of_range` |
+| Result overflows (±Inf, e.g. `1e308 * 10`) | 422 | `result_out_of_range` |
 | Unknown path | 404 | `not_found` |
 | Wrong HTTP method | 405 | `method_not_allowed` (+ `Allow` header) |
 | `Content-Type` is not `application/json` | 415 | `unsupported_media_type` |
@@ -138,6 +138,9 @@ Rationale: 400 = the request itself is malformed; 422 = well-formed request whos
 | 404 / 405 | ServeMux plain-text defaults | JSON bodies, so every response follows the error contract. |
 | Content-Type | Not checked | 415 for non-JSON bodies. |
 | `0 ^ -1` | `result_out_of_range` | `division_by_zero`, which is what it is. |
+| `(-8) ^ 0.5` | `result_out_of_range` | `invalid_domain`: the result is not a real number, not too large. |
+| Duplicate / wrong-case keys | `encoding/json` defaults (last wins, case-insensitive) | Rejected with `invalid_request`, found in a senior review. |
+| Request timeout | None | 10 s; AC cancels a request in flight. |
 | Server tests | None (`main.go` was thin) | `run()` is tested: API, static files, graceful shutdown, busy port. |
 | Static files | `http.FileServer` | Same, without directory listings. |
 | Layout | One breakpoint, centred card | Scales continuously with the window; full screen on phones and tablets. |

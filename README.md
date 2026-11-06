@@ -8,8 +8,8 @@ percentage.
 
 - **Backend:** Go standard library only — no frameworks, no third-party modules.
 - **Frontend:** React 19, TypeScript (strict), Vite. Runtime dependencies: `react` and `react-dom` only.
-- **Tests:** Go table-driven tests + `httptest`; Vitest + Testing Library. Coverage: backend 89.9%,
-  frontend 98.4% of statements (details [below](#testing-and-coverage)).
+- **Tests:** Go table-driven tests + `httptest`; Vitest + Testing Library. Coverage: backend 90.4%,
+  frontend 98.6% of statements (details [below](#testing-and-coverage)).
 
 ## Contents
 
@@ -154,16 +154,16 @@ Every error has the same shape, with a stable machine-readable `code` and a huma
 
 | Status | `code` | When |
 |---|---|---|
-| 400 | `invalid_request` | Malformed JSON, wrong type, unknown field, body over 1 KB, more than one JSON value |
-| 400 | `unknown_operation` | `operation` missing or not in the table above |
+| 400 | `invalid_request` | Malformed JSON, wrong type, number beyond float64 range, unknown or duplicate field, body over 1 KB, more than one JSON value, `operation` missing |
+| 400 | `unknown_operation` | `operation` not in the table above (checked before the operands) |
 | 400 | `missing_operand` | `a` missing, or `b` missing for a binary operation |
 | 400 | `unexpected_operand` | `b` sent for `sqrt` |
 | 404 | `not_found` | Unknown path |
 | 405 | `method_not_allowed` | Wrong method (with an `Allow` header) |
 | 415 | `unsupported_media_type` | `Content-Type` is not `application/json` |
 | 422 | `division_by_zero` | `b` is 0 for `divide`, or 0 raised to a negative power |
-| 422 | `invalid_domain` | Square root of a negative number |
-| 422 | `result_out_of_range` | Result overflows float64, or is not a real number (e.g. `(-8) ^ 0.5`) |
+| 422 | `invalid_domain` | Square root of a negative number, or a result that is not a real number (`(-8) ^ 0.5`) |
+| 422 | `result_out_of_range` | Result overflows float64 (`1e308 * 10`) |
 
 Examples (real output):
 
@@ -182,6 +182,10 @@ curl -s -w 'HTTP %{http_code}\n' localhost:8080/api/v1/calculate -H 'Content-Typ
 
 curl -s -w 'HTTP %{http_code}\n' localhost:8080/api/v1/calculate -H 'Content-Type: application/json' -d '{"operation":"add","a":"2","b":3}'
 # {"error":{"code":"invalid_request","message":"field \"a\" must be a number"}}
+# HTTP 400
+
+curl -s -w 'HTTP %{http_code}\n' localhost:8080/api/v1/calculate -H 'Content-Type: application/json' -d '{"operation":"add","a":1,"b":2,"operation":"divide"}'
+# {"error":{"code":"invalid_request","message":"duplicate field \"operation\""}}
 # HTTP 400
 
 curl -s -w 'HTTP %{http_code}\n' localhost:8080/api/v1/calculate -H 'Content-Type: application/json' -d '{"operation":"subtract","a":5}'
@@ -219,22 +223,24 @@ Coverage at the time of writing:
 | Layer | Package / scope | Statements |
 |---|---|---|
 | Backend | `internal/calculator` | 100% |
-| Backend | `internal/api` | 95.8% |
+| Backend | `internal/api` | 94.3% |
 | Backend | `cmd/server` | 75.5% (the untested remainder is mostly `main()` itself) |
-| Backend | **total** | **89.9%** |
-| Frontend | all of `src/` (111 tests) | **98.4%** statements, 95.2% branches, 100% lines |
+| Backend | **total** | **90.4%** |
+| Frontend | all of `src/` (126 tests) | **98.6%** statements, 95.8% branches, 100% lines |
 
 What is tested:
 
 - **Calculator domain** — every operation, arity errors, division by zero, `0` to a negative power, negative
-  square roots, overflow and NaN, very large and very small values.
+  square roots, overflow and NaN, very large and very small values, percent of huge numbers, and that a
+  zero result is never `-0`.
 - **HTTP handler** — success per operation, every error code, malformed/oversized/trailing bodies, wrong types,
-  unknown fields, content types, 404/405 bodies and `Allow` headers.
+  unknown, duplicate and wrong-case fields, out-of-range numbers, validation order, content types, 404/405
+  bodies and `Allow` headers.
 - **Server** — starts on a free port, serves the API, serves static files without directory listings, shuts
   down gracefully, fails fast on a busy port.
 - **Frontend** — the keypad state machine (a pure reducer), number formatting, input parsing, the API client
-  (success, API errors, malformed responses, network failure, aborts), and the component through the keypad
-  and the keyboard with a mocked API.
+  (success, API errors, malformed responses, network failure, aborts, timeouts), and the component through the keypad
+  and the keyboard with a mocked API, including AC cancelling a request that never answers.
 
 CI (`.github/workflows/ci.yml`) runs all of the above on every push and pull request, uploads both coverage
 reports as artifacts, and builds and smoke-tests the Docker image.
@@ -251,8 +257,9 @@ tell "my code has a bug" apart from "the user asked for something impossible", a
 stable contract; messages are for humans.
 
 **Strict input handling.** Bodies are capped at 1 KB, unknown fields and trailing data are rejected, and
-`Content-Type` must be JSON. A typo such as `"B": 4` fails loudly instead of being silently ignored. Duplicate
-keys follow `encoding/json` (the last one wins).
+`Content-Type` must be JSON. Keys must match exactly and appear once: by default `encoding/json` matches keys
+case-insensitively and lets the last duplicate win, so `{"a":1,"A":5}` would quietly compute with 5, and a
+repeated `"operation"` could turn an `add` into a `divide`. A small key check before decoding rejects both.
 
 **The domain package knows nothing about HTTP.** `internal/calculator` is pure functions with sentinel errors;
 `internal/api` decodes, validates the shape and maps errors to status codes. The optional second operand is a
@@ -262,7 +269,10 @@ binary functions would be the alternative if the operation set grew.
 **float64 everywhere.** Both Go and JavaScript use IEEE-754 doubles, so values round-trip through JSON without
 loss. The API returns the exact double (`0.1 + 0.2` → `0.30000000000000004`); the UI rounds to 12 significant
 digits for display. A decimal library would only be justified for money, which this is not. Non-finite results
-are errors because JSON cannot represent `Inf` or `NaN`.
+are errors because JSON cannot represent `Inf` or `NaN`, and a zero result is always `0`, never `-0`.
+
+**The UI never gets stuck.** Requests time out after 10 s, and AC cancels one in flight. The expression line
+shows computed values rounded exactly like the main display, and typed values exactly as typed.
 
 **Percent is binary: `a % of b`.** `15 % 200` is 30. Pocket calculators overload `%` contextually
 (`200 + 15 %` → 230), which is ambiguous to specify as an API; the explicit form is documented and
