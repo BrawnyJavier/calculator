@@ -1,0 +1,11 @@
+# Render Blueprint: deploys the Dockerfile as one web service that serves the UI and the API.
+# Render sets PORT at runtime, and the server listens on it; STATIC_DIR comes from the image.
+services:
+  - type: web
+    name: calculator
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /healthz
+    # Deploy a push to main only after its GitHub checks (CI) have passed.
+    autoDeployTrigger: checksPass

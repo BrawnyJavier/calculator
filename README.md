@@ -66,6 +66,13 @@ distroless, non-root base; the Go server serves both the UI and the API.
 The image is about 16 MB. It was built and smoke-tested locally (with Colima on Apple silicon), and the CI
 `docker` job repeats that on every push: health check, UI, one calculation.
 
+### Deploy to Render
+
+[`render.yaml`](render.yaml) is a Render Blueprint that runs the same image as one free web service. In the
+Render dashboard choose **New → Blueprint**, select this repository, and apply. Render builds the
+Dockerfile, sets `PORT`, checks `/healthz`, and redeploys each push to `main` once CI has passed. On the free
+plan the service sleeps when idle, so the first request after a while can take up to a minute.
+
 ### Configuration
 
 The server reads two environment variables:
@@ -325,7 +332,8 @@ fits any window size by scaling with the viewport, goes full screen on phones an
 ├── .github/workflows/ci.yml   # lint, test, coverage, build, Docker smoke test
 ├── Dockerfile                 # node build → go build → distroless runtime
 ├── Makefile
-└── PROMPTS.md                 # prompts used with the AI assistant
+├── PROMPTS.md                 # prompts used with the AI assistant
+└── render.yaml                # Render Blueprint (one free Docker web service)
 ```
 
 ## What I would add next
