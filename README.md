@@ -4,6 +4,10 @@ A full-stack calculator: a **React + TypeScript** keypad frontend backed by a **
 every calculation. Supports addition, subtraction, multiplication, division, exponentiation, square root and
 percentage.
 
+**Live demo:** <https://calculator-pq1z.onrender.com> (on Render's free plan, so the first load after an
+idle period can take up to a minute while the service wakes up). The API is at the same address, e.g.
+`curl https://calculator-pq1z.onrender.com/healthz`.
+
 ![Calculator UI](docs/screenshot.png)
 
 - **Backend:** Go standard library only — no frameworks, no third-party modules.
@@ -69,7 +73,7 @@ The image is about 16 MB. It was built and smoke-tested locally (with Colima on 
 ### Deploy to Render
 
 [`render.yaml`](render.yaml) is a Render Blueprint that runs the same image as one free web service. In the
-Render dashboard choose **New → Blueprint**, select this repository, and apply. Render builds the
+Render dashboard choose **New → Blueprint**, select this repository, and apply. The live demo above runs this way. Render builds the
 Dockerfile, sets `PORT`, checks `/healthz`, and redeploys each push to `main` once CI has passed. On the free
 plan the service sleeps when idle, so the first request after a while can take up to a minute.
 
