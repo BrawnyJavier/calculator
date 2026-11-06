@@ -1,4 +1,4 @@
-import { useEffect, useReducer, useRef, useState } from 'react'
+import { useEffect, useEffectEvent, useReducer, useRef, useState } from 'react'
 import { ApiError, calculate, type CalculateRequest } from '../api'
 import {
   buildRequest,
@@ -45,24 +45,37 @@ const operator = (operation: BinaryOperation, label: string, keys: string[]): Ke
   keys,
 })
 
+/** A non-digit, non-operator key: AC, ⌫, √, ±, = and the decimal point. */
+const special = (
+  id: string,
+  label: string,
+  ariaLabel: string,
+  press: KeyPress,
+  keys: string[],
+  variant: KeyDef['variant'] = 'function',
+  className?: string,
+): KeyDef => ({ id, label, ariaLabel, variant, press, keys, className })
+
+const input = (action: CalculatorAction): KeyPress => ({ kind: 'input', action })
+
 // Listed in grid order: 4 columns, "=" spans two rows and "0" two columns.
 const KEYS: readonly KeyDef[] = [
-  { id: 'clear', label: 'AC', ariaLabel: 'All clear', variant: 'function', press: { kind: 'input', action: { type: 'clear' } }, keys: ['Escape', 'Delete'] },
-  { id: 'backspace', label: '⌫', ariaLabel: 'Backspace', variant: 'function', press: { kind: 'input', action: { type: 'backspace' } }, keys: ['Backspace'] },
+  special('clear', 'AC', 'All clear', input({ type: 'clear' }), ['Escape', 'Delete']),
+  special('backspace', '⌫', 'Backspace', input({ type: 'backspace' }), ['Backspace']),
   operator('percent', '%', ['%']),
   operator('divide', '÷', ['/']),
-  { id: 'sqrt', label: '√', ariaLabel: 'Square root', variant: 'function', press: { kind: 'sqrt' }, keys: ['r', 'R'] },
+  special('sqrt', '√', 'Square root', { kind: 'sqrt' }, ['r', 'R']),
   operator('power', 'xʸ', ['^']),
-  { id: 'sign', label: '±', ariaLabel: 'Toggle sign', variant: 'function', press: { kind: 'input', action: { type: 'toggleSign' } }, keys: ['n', 'N'] },
+  special('sign', '±', 'Toggle sign', input({ type: 'toggleSign' }), ['n', 'N']),
   operator('multiply', '×', ['*', 'x', 'X']),
   digit('7'), digit('8'), digit('9'),
   operator('subtract', '−', ['-']),
   digit('4'), digit('5'), digit('6'),
   operator('add', '+', ['+']),
   digit('1'), digit('2'), digit('3'),
-  { id: 'equals', label: '=', ariaLabel: 'Equals', variant: 'equals', press: { kind: 'equals' }, keys: ['=', 'Enter'], className: 'key--tall' },
+  special('equals', '=', 'Equals', { kind: 'equals' }, ['=', 'Enter'], 'equals', 'key--tall'),
   digit('0'),
-  { id: 'decimal', label: '.', ariaLabel: 'Decimal point', variant: 'digit', press: { kind: 'input', action: { type: 'decimal' } }, keys: ['.', ','] },
+  special('decimal', '.', 'Decimal point', input({ type: 'decimal' }), ['.', ','], 'digit'),
 ]
 
 const KEY_BY_KEYBOARD = new Map(KEYS.flatMap((key) => key.keys.map((k) => [k, key] as const)))
@@ -85,6 +98,8 @@ export function Calculator() {
 
   /** Sends a calculation; resolves to whether it succeeded. */
   async function run(request: CalculateRequest): Promise<boolean> {
+    // Only one calculation is ever in flight; cancel any stale one first.
+    requestRef.current?.abort()
     const controller = new AbortController()
     requestRef.current = controller
     dispatch({ type: 'requestStarted' })
@@ -133,21 +148,24 @@ export function Calculator() {
   }
 
   // Keyboard support: digits, operators, Enter/=, Backspace, Escape.
+  // useEffectEvent always sees the latest state, so the listener is
+  // subscribed once instead of on every render.
+  const onKeyDown = useEffectEvent((event: KeyboardEvent) => {
+    if (event.ctrlKey || event.metaKey || event.altKey) return
+    const key = KEY_BY_KEYBOARD.get(event.key)
+    if (!key) return
+    // Also stops Enter from clicking a focused key a second time.
+    event.preventDefault()
+    setFlashedKey(key.id)
+    window.clearTimeout(flashTimer.current)
+    flashTimer.current = window.setTimeout(() => setFlashedKey(null), FLASH_MS)
+    void press(key)
+  })
+
   useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.ctrlKey || event.metaKey || event.altKey) return
-      const key = KEY_BY_KEYBOARD.get(event.key)
-      if (!key) return
-      // Also stops Enter from clicking a focused key a second time.
-      event.preventDefault()
-      setFlashedKey(key.id)
-      window.clearTimeout(flashTimer.current)
-      flashTimer.current = window.setTimeout(() => setFlashedKey(null), FLASH_MS)
-      void press(key)
-    }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  })
+  }, [])
 
   const loading = state.status === 'loading'
   const error = state.status === 'error'

@@ -3,8 +3,12 @@ import { formatExpression, formatPending } from './format'
 import type { BinaryOperation } from './operations'
 import { parseOperand } from './validation'
 
-/** Maximum digits the user can type into a single entry. */
-export const MAX_DIGITS = 16
+/**
+ * Maximum digits the user can type into a single entry. float64 represents
+ * every 15-digit decimal exactly; a 16th digit could be silently changed
+ * (9999999999999999 parses as 10000000000000000).
+ */
+export const MAX_DIGITS = 15
 
 /**
  * Keypad state. The calculator works like a classic pocket calculator: one

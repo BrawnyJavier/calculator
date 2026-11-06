@@ -80,8 +80,14 @@ describe('calculate', () => {
     expect(err).toMatchObject({ code: 'http_error', status: 500 })
   })
 
-  it('throws invalid_response when a successful response has no numeric result', async () => {
-    fetchMock.mockResolvedValue(jsonResponse({ result: '3' }))
+  it.each([
+    ['a non-numeric result', { operation: 'add', a: 1, b: 2, result: '3' }],
+    ['no operation', { a: 1, b: 2, result: 3 }],
+    ['a non-numeric operand', { operation: 'add', a: '1', b: 2, result: 3 }],
+    ['a non-numeric b', { operation: 'add', a: 1, b: null, result: 3 }],
+    ['a non-object body', [3]],
+  ])('throws invalid_response when a successful response has %s', async (_, body) => {
+    fetchMock.mockResolvedValue(jsonResponse(body))
 
     const err = await captureError(calculate({ operation: 'add', a: 1, b: 2 }))
 

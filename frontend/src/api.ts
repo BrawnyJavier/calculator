@@ -95,5 +95,11 @@ function isErrorBody(body: unknown): body is { error: { code: string; message: s
 }
 
 function isCalculateResponse(body: unknown): body is CalculateResponse {
-  return isObject(body) && typeof body.result === 'number'
+  return (
+    isObject(body) &&
+    typeof body.operation === 'string' &&
+    typeof body.a === 'number' &&
+    (body.b === undefined || typeof body.b === 'number') &&
+    typeof body.result === 'number'
+  )
 }

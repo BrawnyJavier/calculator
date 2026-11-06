@@ -3,16 +3,20 @@ import type { BinaryOperation } from './operations'
 
 /**
  * Formats a number for display, rounding to 12 significant digits to hide
- * binary floating-point noise (0.1 + 0.2 shows as 0.3), and switching to
- * scientific notation when the result would not fit the display. The API
- * still returns the exact float64 value.
+ * binary floating-point noise (0.1 + 0.2 shows as 0.3). Scientific notation is
+ * used when the result would not fit the display, and whenever rounding drops
+ * integer digits: 1234567890123456 shows as 1.23456789012e+15, never as a
+ * plausible-looking but wrong 1234567890120000. The API still returns the
+ * exact float64 value.
  */
 export function formatNumber(value: number): string {
-  const rounded = Number(value.toPrecision(12))
+  const rounded = Number(value.toPrecision(SIGNIFICANT_DIGITS))
   const text = String(rounded)
-  return text.length > MAX_DISPLAY_LENGTH ? rounded.toExponential() : text
+  const lostIntegerDigits = rounded !== value && Math.abs(rounded) >= 10 ** SIGNIFICANT_DIGITS
+  return lostIntegerDigits || text.length > MAX_DISPLAY_LENGTH ? rounded.toExponential() : text
 }
 
+const SIGNIFICANT_DIGITS = 12
 const MAX_DISPLAY_LENGTH = 16
 
 const BINARY_SYMBOLS: Record<BinaryOperation, string> = {
