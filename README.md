@@ -63,8 +63,8 @@ docker run --rm -p 8080:8080 calculator
 Open <http://localhost:8080>. The image builds the frontend, compiles a static Go binary, and runs it on a
 distroless, non-root base; the Go server serves both the UI and the API.
 
-> Docker was not available on the machine this was developed on, so the image was not built locally. The CI
-> `docker` job builds it and smoke-tests the running container (health check, UI, one calculation).
+The image is about 16 MB. It was built and smoke-tested locally (with Colima on Apple silicon), and the CI
+`docker` job repeats that on every push: health check, UI, one calculation.
 
 ### Configuration
 

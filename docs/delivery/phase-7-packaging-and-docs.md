@@ -36,6 +36,7 @@ single-container deployment, CI, and a README that covers every item the assignm
 - Pin base image versions. `.dockerignore`: `node_modules`, `dist`, `coverage*`, `.git`.
 - **Docker is not installed on the dev machine** — if it stays that way, README states the Dockerfile
   is unverified locally and CI builds it instead.
+  *Outcome:* Colima was installed at the end; the image builds (~16 MB) and passes the same smoke test as CI.
 
 ## CI (`.github/workflows/ci.yml`)
 - On push/PR: job `backend` (setup-go, `go vet`, `go test -race -cover`), job `frontend`
